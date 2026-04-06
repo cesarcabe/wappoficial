@@ -2,7 +2,7 @@
  * Chat Agent - Tool-based RAG (Vercel AI SDK pattern)
  *
  * Agente de chat que processa conversas do inbox usando IA.
- * Suporta múltiplos providers: Google (Gemini), OpenAI (GPT), Anthropic (Claude).
+ * Suporta Google Gemini e OpenAI diretamente com chave do usuário.
  *
  * Usa RAG próprio com Supabase pgvector seguindo o padrão recomendado pela Vercel:
  * - O LLM recebe uma tool `searchKnowledgeBase` e DECIDE quando usá-la
@@ -17,8 +17,8 @@
 
 import { z } from 'zod'
 import { getSupabaseAdmin } from '@/lib/supabase'
-import { DEFAULT_MODEL_ID, normalizeToGatewayModelId } from '@/lib/ai/model'
-import { getAiGatewayConfig } from '@/lib/ai/ai-center-config'
+import { DEFAULT_MODEL_ID } from '@/lib/ai/model'
+import { getAiDirectConfig } from '@/lib/ai/ai-center-config'
 import type { AIAgent, InboxConversation, InboxMessage } from '@/types'
 
 // NOTE: AI dependencies are imported DYNAMICALLY inside processChatAgent
@@ -307,7 +307,9 @@ export async function processChatAgent(
   const startTime = Date.now()
 
   // Dynamic imports - required for background execution context
-  const { generateText, tool, stepCountIs, gateway } = await import('ai')
+  const { generateText, tool, stepCountIs } = await import('ai')
+  const { createGoogleGenerativeAI } = await import('@ai-sdk/google')
+  const { createOpenAI } = await import('@ai-sdk/openai')
   const { withDevTools } = await import('@/lib/ai/devtools')
   const {
     findRelevantContent,
@@ -349,24 +351,36 @@ export async function processChatAgent(
     mem0Enabled = false
   }
 
-  // Verificar se o AI Gateway está habilitado
-  const gatewayConfig = await getAiGatewayConfig()
-  if (!gatewayConfig.enabled) {
+  // Obter configuração de provider direto (Google / OpenAI)
+  const directConfig = await getAiDirectConfig()
+  if (!directConfig.googleApiKey && !directConfig.openaiApiKey) {
     return {
       success: false,
-      error: 'IA desativada',
+      error: 'Nenhuma chave de API configurada. Acesse Configurações → IA.',
       latencyMs: Date.now() - startTime,
     }
   }
 
-  // Get model configuration - routes through AI Gateway via OIDC
-  const modelId = agent.model || DEFAULT_MODEL_ID
+  const modelId = agent.model || directConfig.model || DEFAULT_MODEL_ID
 
-  const gatewayModelId = normalizeToGatewayModelId(modelId)
-  const baseModel = gateway(gatewayModelId)
-  const model = await withDevTools(baseModel, { name: `agente:${agent.name}` })
+  // Criar instância do modelo com a chave do usuário
+  let rawModel
+  if (directConfig.provider === 'openai' && directConfig.openaiApiKey) {
+    const openai = createOpenAI({ apiKey: directConfig.openaiApiKey })
+    rawModel = openai(modelId)
+  } else if (directConfig.googleApiKey) {
+    const google = createGoogleGenerativeAI({ apiKey: directConfig.googleApiKey })
+    rawModel = google(modelId)
+  } else {
+    return {
+      success: false,
+      error: `Chave ${directConfig.provider === 'openai' ? 'OpenAI' : 'Google'} não configurada. Acesse Configurações → IA.`,
+      latencyMs: Date.now() - startTime,
+    }
+  }
 
-  console.log(`[chat-agent] Using gateway model: ${gatewayModelId}`)
+  const model = await withDevTools(rawModel, { name: `agente:${agent.name}` })
+  console.log(`[chat-agent] Using ${directConfig.provider}/${modelId}`)
 
   // Check if agent has indexed content in pgvector
   let hasKnowledgeBase = false

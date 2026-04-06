@@ -1,4 +1,4 @@
-import type { AiFallbackConfig, AiPromptsConfig, AiRoutesConfig } from '../lib/ai/ai-center-defaults';
+import type { AiPromptsConfig, AiRoutesConfig } from '../lib/ai/ai-center-defaults';
 import { api } from '@/lib/api';
 import { storage } from '../lib/storage';
 import { AppSettings, CalendarBookingConfig, WorkflowExecutionConfig } from '../types';
@@ -7,16 +7,11 @@ import { AppSettings, CalendarBookingConfig, WorkflowExecutionConfig } from '../
 // OCR CONFIGURATION TYPES
 // =============================================================================
 
-export type OCRProviderType = 'gemini' | 'mistral'
+export type OCRProviderType = 'gemini'
 
 export interface OCRConfig {
   provider: OCRProviderType
   geminiModel: string
-  mistralStatus: {
-    isConfigured: boolean
-    source: 'database' | 'env' | 'none'
-    tokenPreview: string | null
-  }
 }
 
 // =============================================================================
@@ -271,24 +266,22 @@ export const settingsService = {
   getAIConfig: () => api.get('/api/settings/ai'),
 
   /**
-   * Save AI settings (including OCR configuration)
+   * Save AI settings
    */
   saveAIConfig: (data: {
     provider?: string;
     model?: string;
+    google_api_key?: string;
+    openai_api_key?: string;
     routes?: AiRoutesConfig;
     prompts?: AiPromptsConfig;
-    fallback?: AiFallbackConfig;
-    // OCR fields
-    ocr_provider?: OCRProviderType;
     ocr_gemini_model?: string;
-    mistral_api_key?: string;
   }) => api.post('/api/settings/ai', data),
 
   /**
-   * Remove API key for a specific provider (including mistral for OCR)
+   * Remove API key for a specific provider
    */
-  removeAIKey: async (provider: 'mistral') => {
+  removeAIKey: async (provider: 'google' | 'openai') => {
     const response = await fetch(`/api/settings/ai?provider=${provider}`, {
       method: 'DELETE',
     });

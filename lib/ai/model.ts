@@ -31,27 +31,10 @@ export type CallOptions = z.infer<typeof callOptionsSchema>
 // =============================================================================
 
 /**
- * Default model for AI agents (formato "provider/model" do AI Gateway)
+ * Model ID padrão para agentes de IA (formato bare, sem prefixo de provider).
+ * O provider é determinado pela configuração em Configurações → IA.
  */
-export const DEFAULT_MODEL_ID = 'google/gemini-3-flash-preview'
-
-/**
- * Converte um model ID bare (sem provider) para o formato "provider/model" do AI Gateway.
- *
- * Exemplos:
- *   'gemini-3-flash-preview'   → 'google/gemini-3-flash-preview'
- *   'gpt-4.1-mini'             → 'openai/gpt-4.1-mini'
- *   'claude-sonnet-4.5'        → 'anthropic/claude-sonnet-4.5'
- *   'google/gemini-2.5-flash'  → 'google/gemini-2.5-flash'  (já normalizado)
- */
-export function normalizeToGatewayModelId(modelId: string): string {
-    if (!modelId) return DEFAULT_MODEL_ID
-    if (modelId.includes('/')) return modelId  // já está no formato correto
-    if (modelId.startsWith('gemini')) return `google/${modelId}`
-    if (modelId.startsWith('gpt')) return `openai/${modelId}`
-    if (modelId.startsWith('claude')) return `anthropic/${modelId}`
-    return `google/${modelId}`  // fallback: assume Google
-}
+export const DEFAULT_MODEL_ID = 'gemini-2.5-flash'
 
 // Re-export from providers.ts - single source of truth for models
 export { AI_PROVIDERS, getProvider, getModel, getDefaultModel } from './providers'

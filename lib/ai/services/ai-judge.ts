@@ -1,17 +1,18 @@
-import { generateText, gateway, Output } from 'ai'
+import { generateText, Output } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 import { JudgmentSchema, type Judgment } from '../schemas/template-schemas'
 import { buildUtilityJudgePrompt } from '../prompts/utility-judge'
-import { getAiPromptsConfig } from '../ai-center-config'
-import { DEFAULT_MODEL_ID, normalizeToGatewayModelId } from '../model'
+import { getAiDirectConfig, getAiPromptsConfig } from '../ai-center-config'
+import { DEFAULT_MODEL_ID } from '../model'
 
 // ============================================================================
 // AI JUDGE SERVICE
 // Usa LLM para analisar se template será aprovado como UTILITY pela Meta
-// Roteado 100% via Vercel AI Gateway (OIDC automático)
+// Usa providers diretos (Google/OpenAI) com chave do banco
 // ============================================================================
 
 export interface JudgeOptions {
-    /** @deprecated Não mais necessário — Gateway usa env vars do Vercel automaticamente */
     apiKey?: string
     model?: string
 }
@@ -24,10 +25,21 @@ export async function judgeTemplate(
     options: JudgeOptions,
     promptTemplate?: string
 ): Promise<Judgment> {
-    const modelId = normalizeToGatewayModelId(options.model || DEFAULT_MODEL_ID)
-    const model = gateway(modelId)
+    const config = await getAiDirectConfig()
+    const targetModelId = options.model || config.model || DEFAULT_MODEL_ID
 
-    console.log(`[AI_JUDGE] Using model: ${modelId} (via Gateway)`)
+    let model
+    if (config.provider === 'google') {
+        if (!config.googleApiKey) throw new Error('Chave Google não configurada. Acesse Configurações → IA.')
+        const google = createGoogleGenerativeAI({ apiKey: config.googleApiKey })
+        model = google(targetModelId)
+    } else {
+        if (!config.openaiApiKey) throw new Error('Chave OpenAI não configurada. Acesse Configurações → IA.')
+        const openai = createOpenAI({ apiKey: config.openaiApiKey })
+        model = openai(targetModelId)
+    }
+
+    console.log(`[AI_JUDGE] Using model: ${targetModelId} (provider: ${config.provider})`)
 
     const prompt = buildUtilityJudgePrompt(template.header, template.body, promptTemplate)
     const templateName = template.name || 'unknown'

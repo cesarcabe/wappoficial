@@ -27,7 +27,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { z } from 'zod'
-import { DEFAULT_MODEL_ID, normalizeToGatewayModelId } from '@/lib/ai/model'
+import { DEFAULT_MODEL_ID } from '@/lib/ai/model'
+import { getAiDirectConfig } from '@/lib/ai/ai-center-config'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 import {
   findRelevantContent,
   buildEmbeddingConfigFromAgent,
@@ -243,15 +246,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const hasKnowledgeBase = await hasIndexedContent(agentId)
 
     // Import AI dependencies
-    const { generateText, gateway, tool, stepCountIs } = await import('ai')
+    const { generateText, tool, stepCountIs } = await import('ai')
     const { withDevTools } = await import('@/lib/ai/devtools')
 
-    // Criar modelo via Gateway
-    const modelId = normalizeToGatewayModelId(agent.model || DEFAULT_MODEL_ID)
-    const baseModel = gateway(modelId)
+    // Criar modelo direto via provider
+    const config = await getAiDirectConfig()
+    const targetModelId = agent.model || config.model || DEFAULT_MODEL_ID
+    let baseModel
+    if (config.provider === 'google') {
+        if (!config.googleApiKey) throw new Error('Chave Google não configurada. Acesse Configurações → IA.')
+        baseModel = createGoogleGenerativeAI({ apiKey: config.googleApiKey })(targetModelId)
+    } else {
+        if (!config.openaiApiKey) throw new Error('Chave OpenAI não configurada. Acesse Configurações → IA.')
+        baseModel = createOpenAI({ apiKey: config.openaiApiKey })(targetModelId)
+    }
     const model = await withDevTools(baseModel, { name: `chat:${agent.name}` })
 
-    console.log(`[ai-agents/chat] Using model: ${modelId} (via Gateway), hasKB: ${hasKnowledgeBase}`)
+    console.log(`[ai-agents/chat] Using model: ${targetModelId} (provider: ${config.provider}), hasKB: ${hasKnowledgeBase}`)
 
     // Preparar resposta estruturada
     let structuredResponse: ChatResponse | undefined
@@ -384,7 +395,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       // Metadados
       latency_ms: latencyMs,
-      model: modelId,
+      model: targetModelId,
       session_id: sessionId,
 
       // Análise

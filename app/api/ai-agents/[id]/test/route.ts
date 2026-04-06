@@ -9,7 +9,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { z } from 'zod'
-import { DEFAULT_MODEL_ID, normalizeToGatewayModelId } from '@/lib/ai/model'
+import { DEFAULT_MODEL_ID } from '@/lib/ai/model'
+import { getAiDirectConfig } from '@/lib/ai/ai-center-config'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 import {
   findRelevantContent,
   buildEmbeddingConfigFromAgent,
@@ -141,17 +144,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
     console.log(`[ai-agents/test] hasKnowledgeBase: ${hasKnowledgeBase}, indexed files: ${indexedFilesCount}`)
 
     // Import AI dependencies dynamically
-    const { generateText, gateway, tool, stepCountIs } = await import('ai')
+    const { generateText, tool, stepCountIs } = await import('ai')
     const { withDevTools } = await import('@/lib/ai/devtools')
 
-    // Criar modelo via Gateway
-    const modelId = normalizeToGatewayModelId(agent.model || DEFAULT_MODEL_ID)
-    const baseModel = gateway(modelId)
+    // Criar modelo direto via provider
+    const config = await getAiDirectConfig()
+    const targetModelId = agent.model || config.model || DEFAULT_MODEL_ID
+    let baseModel
+    if (config.provider === 'google') {
+        if (!config.googleApiKey) throw new Error('Chave Google não configurada. Acesse Configurações → IA.')
+        baseModel = createGoogleGenerativeAI({ apiKey: config.googleApiKey })(targetModelId)
+    } else {
+        if (!config.openaiApiKey) throw new Error('Chave OpenAI não configurada. Acesse Configurações → IA.')
+        baseModel = createOpenAI({ apiKey: config.openaiApiKey })(targetModelId)
+    }
 
     // Create model with DevTools support
     const model = await withDevTools(baseModel, { name: `agente:${agent.name}` })
 
-    console.log(`[ai-agents/test] Using model: ${modelId} (via Gateway)`)
+    console.log(`[ai-agents/test] Using model: ${targetModelId} (provider: ${config.provider})`)
 
     // Generate response
     const startTime = Date.now()
@@ -291,7 +302,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({
       response: structuredResponse.message,
       latency_ms: latencyMs,
-      model: modelId,
+      model: targetModelId,
       knowledge_files_used: indexedFilesCount ?? 0,
       rag_enabled: hasKnowledgeBase,
       rag_chunks_used: ragSources.length,

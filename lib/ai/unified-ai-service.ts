@@ -1,26 +1,26 @@
 /**
- * Serviço de IA unificado — 100% AI Gateway.
+ * Serviço de IA unificado — providers diretos (Google Gemini / OpenAI).
  *
- * Usa o Vercel AI Gateway para todo roteamento de modelos, com fallbacks automáticos.
- * Autenticação via VERCEL_OIDC_TOKEN (automático). Configure BYOK no dashboard da Vercel.
- * Lança erro se `gateway.enabled = false` (IA desativada pelo operador).
- *
- * Implementado sobre o Vercel AI SDK v6 com `gateway()` nativo.
+ * Usa as chaves de API do próprio usuário, armazenadas no Supabase.
+ * Cada cliente paga diretamente ao provider — sem intermediação da Vercel.
  *
  * Exemplo:
  * - `import { ai } from '@/lib/ai'`
  * - `const result = await ai.generateText({ prompt: 'Olá' })`
  */
 
-import { generateText as vercelGenerateText, streamText as vercelStreamText, gateway, APICallError, type ModelMessage } from 'ai';
+import { generateText as vercelGenerateText, streamText as vercelStreamText, type ModelMessage } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 
-import { getAiGatewayConfig } from './ai-center-config';
+import { getAiDirectConfig } from './ai-center-config'
+import type { AiDirectConfig } from './ai-center-defaults'
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Alias para compatibilidade retroativa — internamente convertido para ModelMessage. */
+/** Alias para compatibilidade retroativa. */
 export type ChatMessage = {
     role: 'user' | 'assistant' | 'system';
     content: string;
@@ -33,7 +33,7 @@ export interface GenerateTextOptions {
     messages?: ChatMessage[];
     /** Instrução de sistema (contexto) enviada ao modelo. */
     system?: string;
-    /** Sobrescreve o modelo configurado nas settings (formato "provider/model"). */
+    /** Sobrescreve o modelo configurado nas settings (formato bare, ex: 'gemini-2.5-flash'). */
     model?: string;
     /** Máximo de tokens de saída. */
     maxOutputTokens?: number;
@@ -54,78 +54,71 @@ export interface GenerateTextResult {
 }
 
 // =============================================================================
+// PROVIDER FACTORY
+// =============================================================================
+
+/**
+ * Cria a instância do modelo de linguagem com base na configuração de provider.
+ * Lança erro se a chave do provider não estiver configurada.
+ */
+function createModelInstance(config: AiDirectConfig, modelOverride?: string) {
+    const modelId = modelOverride || config.model
+
+    if (config.provider === 'google') {
+        if (!config.googleApiKey) {
+            throw new Error('Chave Google não configurada. Acesse Configurações → IA e insira sua Google API Key.')
+        }
+        const google = createGoogleGenerativeAI({ apiKey: config.googleApiKey })
+        return google(modelId)
+    }
+
+    if (!config.openaiApiKey) {
+        throw new Error('Chave OpenAI não configurada. Acesse Configurações → IA e insira sua OpenAI API Key.')
+    }
+    const openai = createOpenAI({ apiKey: config.openaiApiKey })
+    return openai(modelId)
+}
+
+// =============================================================================
 // ERROR HANDLING
 // =============================================================================
 
 /**
- * Garante que o modelId está no formato "provider/model" exigido pelo AI Gateway.
- * Falha rápido antes de chegar ao gateway, com mensagem clara de diagnóstico.
- *
- * @throws {Error} Se o formato for inválido.
+ * Converte erros de provider em mensagens legíveis.
+ * Trata 401 (chave inválida), 429 (rate limit) e 503 (serviço indisponível).
  */
-function assertValidGatewayModelId(modelId: string): void {
-    if (!modelId || typeof modelId !== 'string') {
-        throw new Error(`[AI Gateway] Model ID inválido: "${modelId}". Um model ID não-vazio é obrigatório.`);
+function handleProviderError(error: unknown, modelId: string): never {
+    if (error && typeof error === 'object' && 'statusCode' in error) {
+        const status = (error as { statusCode: number }).statusCode
+        switch (status) {
+            case 401:
+                throw new Error(`[IA] Chave de API inválida para ${modelId}. Verifique nas configurações de IA.`)
+            case 429:
+                throw new Error(`[IA] Rate limit atingido para ${modelId}. Tente novamente em alguns segundos.`)
+            case 503:
+                throw new Error(`[IA] Serviço temporariamente indisponível para ${modelId}. Tente novamente em breve.`)
+        }
     }
-    const parts = modelId.split('/');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
-        throw new Error(
-            `[AI Gateway] Formato de modelo inválido: "${modelId}". ` +
-            `Use "provider/model" — ex: "google/gemini-2.5-flash", "anthropic/claude-sonnet-4.5".`
-        );
-    }
+    throw error
 }
 
-type GatewayCallBase = {
-    model: ReturnType<typeof gateway>;
-    system: string | undefined;
-    temperature: number;
-    maxOutputTokens?: number;
-    providerOptions?: Record<string, Record<string, unknown>>;
-}
+type CallArgs =
+    | { model: ReturnType<typeof createModelInstance>; system: string | undefined; temperature: number; maxOutputTokens?: number; messages: ModelMessage[] }
+    | { model: ReturnType<typeof createModelInstance>; system: string | undefined; temperature: number; maxOutputTokens?: number; prompt: string }
 
-// Union discriminada compatível com os overloads do AI SDK
-type GatewayCallArgs =
-    | (GatewayCallBase & { messages: ModelMessage[] })
-    | (GatewayCallBase & { prompt: string })
-
-function buildGatewayArgs(
+function buildArgs(
     options: GenerateTextOptions,
-    modelId: string,
-    providerOptions: Record<string, Record<string, unknown>> | undefined,
-): GatewayCallArgs {
-    // Sem anotação em `base`: o spread condicional de providerOptions produz um
-    // tipo inferido que o TypeScript não consegue estreitar para GatewayCallBase
-    // quando a anotação explícita está presente.
+    modelInstance: ReturnType<typeof createModelInstance>,
+): CallArgs {
     const base = {
-        model: gateway(modelId),
+        model: modelInstance,
         system: options.system,
         temperature: options.temperature ?? 0.7,
         ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-    };
-    // ChatMessage é estruturalmente compatível com ModelMessage (role + content string)
+    }
     return (options.messages
         ? { ...base, messages: options.messages as unknown as ModelMessage[] }
-        : { ...base, prompt: options.prompt || '' }) as GatewayCallArgs;
-}
-
-/**
- * Converte APICallError do Gateway em erros legíveis com contexto de ação.
- * Trata 402 (budget), 429 (rate limit) e 503 (serviço indisponível).
- */
-function handleGatewayError(error: unknown, modelId: string): never {
-    if (APICallError.isInstance(error)) {
-        switch (error.statusCode) {
-            case 402:
-                throw new Error(`[AI Gateway] Budget excedido para ${modelId}. Verifique os créditos em vercel.com/dashboard.`);
-            case 429:
-                throw new Error(`[AI Gateway] Rate limit atingido para ${modelId}. Tente novamente em alguns segundos.`);
-            case 503:
-                throw new Error(`[AI Gateway] Serviço temporariamente indisponível para ${modelId}. Tente novamente em breve.`);
-        }
-    }
-    throw error;
+        : { ...base, prompt: options.prompt || '' }) as CallArgs
 }
 
 // =============================================================================
@@ -133,107 +126,82 @@ function handleGatewayError(error: unknown, modelId: string): never {
 // =============================================================================
 
 /**
- * Gera texto usando o AI Gateway com o modelo configurado.
+ * Gera texto usando o provider configurado (Google Gemini ou OpenAI).
  *
- * O modelo primário e fallbacks são lidos da configuração do Gateway.
- * Autenticação via VERCEL_OIDC_TOKEN (automático com `vercel env pull`).
- *
- * @param options Opções de geração (prompt/mensagens, system, temperatura, etc.).
- * @returns Objeto com `text` e o modelo efetivamente usado.
+ * A chave de API é lida do Supabase — configurada pelo usuário nas settings de IA.
  */
 export async function generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
-    const gatewayConfig = await getAiGatewayConfig();
-    if (!gatewayConfig.enabled) {
-        throw new Error('IA desativada. Ative o AI Gateway nas configurações do SmartZap.')
-    }
-    const modelId = options.model || gatewayConfig.primaryModel;
-    assertValidGatewayModelId(modelId);
-    console.log(`[AI Service] Generating with ${modelId} (via Gateway)`);
+    const config = await getAiDirectConfig()
+    const modelId = options.model || config.model
+    console.log(`[AI Service] Generating with ${config.provider}/${modelId}`)
 
-    const providerOptions = gatewayConfig.fallbackModels?.length
-        ? { gateway: { models: gatewayConfig.fallbackModels } }
-        : undefined;
+    const modelInstance = createModelInstance(config, modelId)
 
     try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = await vercelGenerateText(buildGatewayArgs(options, modelId, providerOptions) as any);
-        return { text: result.text, model: modelId };
+        const result = await vercelGenerateText(buildArgs(options, modelInstance) as any)
+        return { text: result.text, model: modelId }
     } catch (error) {
-        handleGatewayError(error, modelId);
+        handleProviderError(error, modelId)
     }
 }
 
 /**
- * Gera texto em streaming usando o AI Gateway.
- *
- * Durante o streaming, chama `onChunk` para cada pedaço de texto e `onComplete`
- * ao finalizar, além de retornar o texto completo.
- *
- * @param options Opções de streaming (inclui callbacks opcionais).
- * @returns Objeto com o texto completo e o modelo efetivamente usado.
+ * Gera texto em streaming usando o provider configurado.
  */
 export async function streamText(options: StreamTextOptions): Promise<GenerateTextResult> {
-    const gatewayConfig = await getAiGatewayConfig();
-    if (!gatewayConfig.enabled) {
-        throw new Error('IA desativada. Ative o AI Gateway nas configurações do SmartZap.')
-    }
-    const modelId = options.model || gatewayConfig.primaryModel;
-    assertValidGatewayModelId(modelId);
-    console.log(`[AI Service] Streaming with ${modelId} (via Gateway)`);
+    const config = await getAiDirectConfig()
+    const modelId = options.model || config.model
+    console.log(`[AI Service] Streaming with ${config.provider}/${modelId}`)
 
-    const providerOptions = gatewayConfig.fallbackModels?.length
-        ? { gateway: { models: gatewayConfig.fallbackModels } }
-        : undefined;
+    const modelInstance = createModelInstance(config, modelId)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = vercelStreamText(buildGatewayArgs(options, modelId, providerOptions) as any);
+    const result = vercelStreamText(buildArgs(options, modelInstance) as any)
 
-    let fullText = '';
+    let fullText = ''
     try {
         for await (const part of result.textStream) {
-            fullText += part;
-            options.onChunk?.(part);
+            fullText += part
+            options.onChunk?.(part)
         }
     } catch (error) {
-        handleGatewayError(error, modelId);
+        handleProviderError(error, modelId)
     }
 
-    options.onComplete?.(fullText);
-
-    return { text: fullText, model: modelId };
+    options.onComplete?.(fullText)
+    return { text: fullText, model: modelId }
 }
 
 /**
  * Gera uma resposta em JSON via IA.
  *
  * @typeParam T Tipo esperado do JSON retornado.
- * @param options Opções de geração.
- * @returns Objeto JSON parseado, tipado como `T`.
  */
 export async function generateJSON<T = unknown>(options: GenerateTextOptions): Promise<T> {
     const result = await generateText({
         ...options,
         system: (options.system || '') + '\n\nRespond with valid JSON only, no markdown.',
-    });
+    })
 
     try {
         const cleanText = result.text
             .replace(/```json\n?/g, '')
             .replace(/```\n?/g, '')
-            .trim();
+            .trim()
 
         try {
-            return JSON.parse(cleanText) as T;
+            return JSON.parse(cleanText) as T
         } catch {
-            const extracted = extractFirstJsonValue(cleanText);
+            const extracted = extractFirstJsonValue(cleanText)
             if (extracted) {
-                return JSON.parse(extracted) as T;
+                return JSON.parse(extracted) as T
             }
-            throw new Error('AI response was not valid JSON');
+            throw new Error('AI response was not valid JSON')
         }
     } catch {
-        console.error('[AI Service] Failed to parse JSON response:', result.text);
-        throw new Error('AI response was not valid JSON');
+        console.error('[AI Service] Failed to parse JSON response:', result.text)
+        throw new Error('AI response was not valid JSON')
     }
 }
 
@@ -241,7 +209,7 @@ export async function generateJSON<T = unknown>(options: GenerateTextOptions): P
  * Limpa o cache de settings de IA (compatibilidade retroativa).
  */
 export function clearSettingsCache() {
-    // No-op: cache é gerenciado pela camada de configuração do Gateway
+    // No-op: cache é gerenciado pela camada de configuração
 }
 
 // =============================================================================
@@ -253,37 +221,37 @@ function extractFirstJsonValue(text: string): string | null {
         ...['{', '[']
             .map((c) => text.indexOf(c))
             .filter((i) => i >= 0)
-    );
+    )
 
-    if (!Number.isFinite(start) || start < 0) return null;
+    if (!Number.isFinite(start) || start < 0) return null
 
-    const open = text[start];
-    const close = open === '{' ? '}' : ']';
+    const open = text[start]
+    const close = open === '{' ? '}' : ']'
 
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
+    let depth = 0
+    let inString = false
+    let escaped = false
 
     for (let i = start; i < text.length; i += 1) {
-        const ch = text[i];
+        const ch = text[i]
 
         if (inString) {
-            if (escaped) { escaped = false; continue; }
-            if (ch === '\\') { escaped = true; continue; }
-            if (ch === '"') { inString = false; }
-            continue;
+            if (escaped) { escaped = false; continue }
+            if (ch === '\\') { escaped = true; continue }
+            if (ch === '"') { inString = false }
+            continue
         }
 
-        if (ch === '"') { inString = true; continue; }
-        if (ch === open) depth += 1;
-        if (ch === close) depth -= 1;
+        if (ch === '"') { inString = true; continue }
+        if (ch === open) depth += 1
+        if (ch === close) depth -= 1
 
         if (depth === 0) {
-            return text.slice(start, i + 1).trim();
+            return text.slice(start, i + 1).trim()
         }
     }
 
-    return null;
+    return null
 }
 
 // =============================================================================
@@ -295,10 +263,10 @@ export const ai = {
     streamText,
     generateJSON,
     clearSettingsCache,
-};
+}
 
-export default ai;
+export default ai
 
 // Re-export types and providers (compatibilidade retroativa)
-export { AI_PROVIDERS, getProvider, getModel, getDefaultModel } from './providers';
-export type { AIProvider, AIModel, AIProviderConfig } from './providers';
+export { AI_PROVIDERS, getProvider, getModel, getDefaultModel } from './providers'
+export type { AIProvider, AIModel, AIProviderConfig } from './providers'

@@ -140,7 +140,7 @@ const TEMPLATE_STRATEGIES: StrategyItem[] = [
 ]
 
 // URLs para criação de chaves de API de cada provider
-const API_KEY_URLS: Record<AIProvider | 'mistral', { url: string; label: string }> = {
+const API_KEY_URLS: Record<AIProvider, { url: string; label: string }> = {
   google: {
     url: 'https://aistudio.google.com/apikey',
     label: 'Google AI Studio',
@@ -148,14 +148,6 @@ const API_KEY_URLS: Record<AIProvider | 'mistral', { url: string; label: string 
   openai: {
     url: 'https://platform.openai.com/api-keys',
     label: 'OpenAI Platform',
-  },
-  anthropic: {
-    url: 'https://console.anthropic.com/settings/keys',
-    label: 'Anthropic Console',
-  },
-  mistral: {
-    url: 'https://console.mistral.ai/api-keys/',
-    label: 'Mistral Console',
   },
 }
 
@@ -494,36 +486,24 @@ export default function AICenterPage() {
     isDevMode,
     provider,
     model,
-    primaryModelLabel,
-    fallback,
-    fallbackSummary,
+    models,
+    modelsLoading,
     routes,
     prompts,
-    primaryModelOptions,
     isLoading,
     isSaving,
     errorMessage,
     ocrConfig,
-    mistralKeyDraft,
     isSavingOcr,
-    showMistralKeyInput,
     isStrategiesOpen,
     handleSave,
     handleProviderSelect,
-    handleFallbackMove,
-    handleFallbackToggle,
     handleModelChange,
-    handleOcrProviderChange,
     handleOcrGeminiModelChange,
-    handleSaveMistralKey,
-    handleRemoveMistralKey,
-    handleMistralKeyInputToggle,
     handlePromptChange,
     handleRouteToggle,
     handleStrategiesToggle,
-    setMistralKeyDraft,
-    getProviderConfig,
-    getModelLabel,
+    fetchModels,
   } = useSettingsAIController()
 
   return (
@@ -609,104 +589,59 @@ export default function AICenterPage() {
 
       <div className="space-y-6">
         <section className="glass-panel rounded-2xl p-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">Modelo principal</h3>
-              <p className="text-sm text-[var(--ds-text-secondary)]">
-                Escolha o provider e modelo para produção. Auth via AI Gateway OIDC.
-              </p>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)]">
-              <span>Fallback: {fallbackSummary}</span>
-              <MockSwitch
-                on={fallback.enabled}
-                onToggle={handleFallbackToggle}
-                label="Ativar fallback"
-              />
-            </div>
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">Modelo principal</h3>
+            <p className="text-sm text-[var(--ds-text-secondary)]">
+              Escolha o provider e modelo para produção.
+            </p>
           </div>
 
-          <div className="mt-5 space-y-2">
-            {fallback.order.map((providerId, index) => {
-              const item = getProviderConfig(providerId)
-              if (!item) return null
-              const isActive = item.id === provider
-              return (
-                <div
-                  key={item.id}
-                  className={`rounded-xl border p-4 ${
-                    isActive
-                      ? 'border-emerald-500/30 bg-emerald-500/5'
-                      : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)]'
+          <div className="mt-5 space-y-4">
+            {/* Provider selector */}
+            <div className="flex gap-3">
+              {(['google', 'openai'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => { handleProviderSelect(p); void fetchModels(p) }}
+                  className={`flex-1 rounded-xl border px-4 py-3 text-sm font-medium transition ${
+                    provider === p
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                      : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-bg-hover)]'
                   }`}
                 >
-                  <div className="flex flex-wrap items-center gap-3">
-                    {fallback.enabled && (
-                      <div className="flex flex-col items-center gap-1 text-xs text-[var(--ds-text-muted)]">
-                        <button
-                          type="button"
-                          className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ds-border-default)] text-[var(--ds-text-secondary)] transition hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-primary)] disabled:opacity-40"
-                          onClick={() => handleFallbackMove(item.id, -1)}
-                          disabled={index === 0}
-                          aria-label="Mover para cima"
-                        >
-                          <ChevronUp className="size-3" />
-                        </button>
-                        <span className="text-[11px] font-medium text-[var(--ds-text-secondary)]">{index + 1}</span>
-                        <button
-                          type="button"
-                          className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--ds-border-default)] text-[var(--ds-text-secondary)] transition hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-primary)] disabled:opacity-40"
-                          onClick={() => handleFallbackMove(item.id, 1)}
-                          disabled={index === fallback.order.length - 1}
-                          aria-label="Mover para baixo"
-                        >
-                          <ChevronDown className="size-3" />
-                        </button>
-                      </div>
-                    )}
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-[var(--ds-text-primary)]">{item.name}</div>
-                        <div className="text-xs text-[var(--ds-text-secondary)]">
-                          Modelo: {isActive ? primaryModelLabel : getModelLabel(item.id, fallback.models?.[item.id] || item.models[0]?.id || '')}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <StatusPill label={isActive ? 'Em uso' : 'Disponível'} tone={isActive ? 'emerald' : 'zinc'} />
-                        {!isActive && (
-                          <button
-                            type="button"
-                            className="rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-hover)] px-3 py-1.5 text-xs font-medium text-[var(--ds-text-primary)] transition hover:bg-[var(--ds-bg-surface)]"
-                            onClick={() => handleProviderSelect(item.id)}
-                          >
-                            Definir como padrão
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  {p === 'google' ? '✨ Google Gemini' : '⚡ OpenAI'}
+                </button>
+              ))}
+            </div>
 
-                  {isActive && (
-                    <div className="mt-4">
-                      <label className="text-xs text-[var(--ds-text-muted)]">Selecionar modelo</label>
-                      <div className="relative mt-2">
-                        <select
-                          value={model}
-                          onChange={(event) => handleModelChange(event.target.value)}
-                          className="w-full rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] px-3 py-2 text-sm text-[var(--ds-text-primary)] outline-none transition focus:border-emerald-500/40"
-                        >
-                          {primaryModelOptions.map((modelOption) => (
-                            <option key={modelOption.id} value={modelOption.id}>
-                              {modelOption.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+            {/* Model selector */}
+            <div>
+              <label className="text-xs text-[var(--ds-text-muted)]">Modelo</label>
+              <div className="relative mt-2">
+                {modelsLoading ? (
+                  <div className="flex h-10 items-center gap-2 rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] px-3 text-sm text-[var(--ds-text-muted)]">
+                    <Loader2 className="size-4 animate-spin" />
+                    Carregando modelos...
+                  </div>
+                ) : (
+                  <select
+                    value={model}
+                    onChange={(e) => handleModelChange(e.target.value)}
+                    onFocus={() => { if (models.length === 0) void fetchModels(provider) }}
+                    className="w-full rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] px-3 py-2 text-sm text-[var(--ds-text-primary)] outline-none transition focus:border-emerald-500/40"
+                  >
+                    {models.length > 0 ? (
+                      models.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))
+                    ) : (
+                      <option value={model}>{model}</option>
+                    )}
+                  </select>
+                )}
+              </div>
+            </div>
           </div>
         </section>
 
@@ -741,25 +676,14 @@ export default function AICenterPage() {
                   <div>
                     <div className="text-sm font-semibold text-[var(--ds-text-primary)]">Gemini</div>
                     <div className="text-xs text-[var(--ds-text-secondary)]">
-                      Usa o AI Gateway (OIDC)
+                      Usa a chave Google configurada acima
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {ocrConfig.provider === 'gemini' ? (
-                    <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-300">
-                      Em uso
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleOcrProviderChange('gemini')}
-                      disabled={isSavingOcr}
-                      className="rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-hover)] px-3 py-1.5 text-xs font-medium text-[var(--ds-text-primary)] transition hover:bg-[var(--ds-bg-surface)]"
-                    >
-                      Usar Gemini
-                    </button>
-                  )}
+                  <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-300">
+                    Em uso
+                  </span>
                 </div>
               </div>
 
@@ -785,115 +709,13 @@ export default function AICenterPage() {
               )}
             </div>
 
-            {/* Mistral Card */}
-            <div
-              className={`rounded-xl border p-4 transition ${
-                ocrConfig.provider === 'mistral'
-                  ? 'border-emerald-500/30 bg-emerald-500/5'
-                  : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)]'
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-9 items-center justify-center rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-hover)]">
-                    <span className="text-base">🔮</span>
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-[var(--ds-text-primary)]">Mistral</div>
-                    <div className="text-xs text-[var(--ds-text-secondary)]">
-                      {ocrConfig.mistralStatus.isConfigured
-                        ? ocrConfig.mistralStatus.tokenPreview
-                          ? `Chave: ${ocrConfig.mistralStatus.tokenPreview}`
-                          : 'Chave configurada'
-                        : 'Qualidade superior para tabelas'}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {ocrConfig.provider === 'mistral' ? (
-                    <>
-                      <span className="rounded-full bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-300">
-                        Em uso
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleMistralKeyInputToggle}
-                        className="rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-hover)] px-3 py-1.5 text-xs font-medium text-[var(--ds-text-primary)] transition hover:bg-[var(--ds-bg-surface)]"
-                      >
-                        {showMistralKeyInput ? 'Cancelar' : 'Atualizar chave'}
-                      </button>
-                    </>
-                  ) : ocrConfig.mistralStatus.isConfigured ? (
-                    <button
-                      type="button"
-                      onClick={() => handleOcrProviderChange('mistral')}
-                      disabled={isSavingOcr}
-                      className="rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-hover)] px-3 py-1.5 text-xs font-medium text-[var(--ds-text-primary)] transition hover:bg-[var(--ds-bg-surface)]"
-                    >
-                      Usar Mistral
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleMistralKeyInputToggle}
-                      className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/20"
-                    >
-                      {showMistralKeyInput ? 'Cancelar' : 'Adicionar chave'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Mistral Key Input - shown when adding/updating key */}
-              {showMistralKeyInput && (
-                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--ds-border-subtle)] pt-4">
-                  <input
-                    type="password"
-                    placeholder="Chave de API do Mistral"
-                    value={mistralKeyDraft}
-                    onChange={(e) => setMistralKeyDraft(e.target.value)}
-                    className="min-w-[220px] flex-1 rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] px-3 py-2 text-sm text-[var(--ds-text-primary)] outline-none transition focus:border-emerald-500/40"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveMistralKey}
-                    disabled={isSavingOcr || !mistralKeyDraft.trim()}
-                    className="rounded-lg bg-primary-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary-500 dark:bg-white dark:text-zinc-900 dark:hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isSavingOcr ? 'Salvando...' : 'Salvar chave'}
-                  </button>
-                  {ocrConfig.mistralStatus.isConfigured &&
-                    ocrConfig.mistralStatus.source === 'database' && (
-                      <button
-                        type="button"
-                        onClick={handleRemoveMistralKey}
-                        disabled={isSavingOcr}
-                        className="flex items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
-                      >
-                        <Trash2 className="size-3" />
-                        Remover
-                      </button>
-                    )}
-                </div>
-              )}
-            </div>
-
             {/* Info note */}
             <div className="flex items-start gap-2 rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-tertiary)] p-3 text-xs text-[var(--ds-text-secondary)]">
               <Info className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-              <div className="space-y-2">
-                <span>
-                  O OCR converte PDFs e imagens em texto antes de indexar na base de conhecimento
-                  dos agentes. Escolha Gemini para custo-benefício ou Mistral para melhor precisão
-                  em tabelas complexas.
-                </span>
-                <div className="flex items-center gap-2">
-                  <span>Obter chave:</span>
-                  <a href={API_KEY_URLS.mistral.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline">
-                    Mistral <ExternalLink className="size-3" />
-                  </a>
-                </div>
-              </div>
+              <span>
+                O OCR converte PDFs e imagens em texto antes de indexar na base de conhecimento
+                dos agentes. Usa a mesma chave Google configurada acima.
+              </span>
             </div>
           </div>
         </section>

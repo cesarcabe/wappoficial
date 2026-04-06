@@ -95,7 +95,7 @@ export async function processDocumentOCR(
   }
 
   try {
-    const provider = await getOCRProvider(preferredProvider)
+    const provider = await getOCRProvider()
 
     if (!provider) {
       console.warn(`[ocr] No OCR provider available for ${fileName}, using original content`)

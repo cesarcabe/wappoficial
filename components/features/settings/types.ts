@@ -1,7 +1,7 @@
 import { AppSettings, CalendarBookingConfig, WorkflowExecutionConfig } from '../../../types';
 import { AccountLimits } from '../../../lib/meta-limits';
 import { PhoneNumber } from '../../../hooks/useSettings';
-import type { AiFallbackConfig, AiPromptsConfig, AiRoutesConfig } from '../../../lib/ai/ai-center-defaults';
+import type { AiPromptsConfig, AiRoutesConfig } from '../../../lib/ai/ai-center-defaults';
 
 // ============================================================================
 // Shared Types
@@ -113,7 +113,6 @@ export type SaveAIConfigFn = (data: {
   model?: string;
   routes?: AiRoutesConfig;
   prompts?: AiPromptsConfig;
-  fallback?: AiFallbackConfig;
 }) => Promise<void>;
 
 export type SaveWhatsAppThrottleFn = (data: {

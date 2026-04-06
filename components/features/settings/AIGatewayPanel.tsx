@@ -1,190 +1,241 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Route, Info, Loader2, Check, ChevronDown, Search, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Cpu, Eye, EyeOff, Check, X, Loader2, ChevronDown, Search } from 'lucide-react';
 import { toast } from 'sonner';
-import { DEFAULT_AI_GATEWAY, type AiGatewayConfig } from '@/lib/ai/ai-center-defaults';
-import type { GatewayModel } from '@/app/api/ai/gateway-models/route';
+import type { AIModelInfo } from '@/app/api/ai/models/route';
 
 /**
- * AIGatewayPanel - Configuração do Vercel AI Gateway
+ * AIGatewayPanel — Configuração de providers de IA (Google Gemini / OpenAI)
  *
- * O AI Gateway usa autenticação OIDC automática - não requer API key manual.
- * - Em produção (Vercel): token é injetado automaticamente
- * - Local: requer `vercel dev` ou `vercel env pull`
+ * Cada cliente usa sua própria chave de API, paga diretamente ao provider.
+ * Sem intermediação do Vercel AI Gateway.
  */
 
-// Nomes de exibição por provider
-const PROVIDER_NAMES: Record<string, string> = {
-  anthropic: 'Anthropic',
-  google: 'Google',
-  openai: 'OpenAI',
-  mistral: 'Mistral',
-  xai: 'xAI',
-  cohere: 'Cohere',
-  deepseek: 'DeepSeek',
-  meta: 'Meta',
-  perplexity: 'Perplexity',
-};
+// =============================================================================
+// TIPOS
+// =============================================================================
 
-// Cores inativas dos pills de provider
-const PROVIDER_PILL_INACTIVE: Record<string, string> = {
-  anthropic: 'border-amber-500/20 bg-amber-500/5 text-amber-400/70 hover:bg-amber-500/15 hover:text-amber-300',
-  google:    'border-blue-500/20 bg-blue-500/5 text-blue-400/70 hover:bg-blue-500/15 hover:text-blue-300',
-  openai:    'border-emerald-500/20 bg-emerald-500/5 text-emerald-400/70 hover:bg-emerald-500/15 hover:text-emerald-300',
-};
+type AiProvider = 'google' | 'openai';
 
-// Cores ativas dos pills de provider
-const PROVIDER_PILL_ACTIVE: Record<string, string> = {
-  anthropic: 'border-amber-500/50 bg-amber-500/20 text-amber-200',
-  google:    'border-blue-500/50 bg-blue-500/20 text-blue-200',
-  openai:    'border-emerald-500/50 bg-emerald-500/20 text-emerald-200',
-};
+type KeyStatus = 'idle' | 'saving' | 'valid' | 'invalid';
 
-// Cores dos dots nos chips de fallback
-const PROVIDER_DOT: Record<string, string> = {
-  anthropic: 'bg-amber-400',
-  google:    'bg-blue-400',
-  openai:    'bg-emerald-400',
-};
-
-function providerDisplayName(p: string): string {
-  return PROVIDER_NAMES[p.toLowerCase()] ?? (p.charAt(0).toUpperCase() + p.slice(1));
+interface ProviderState {
+  isConfigured: boolean;
+  tokenPreview: string | null;
+  keyStatus: KeyStatus;
+  keyDraft: string;
+  showKey: boolean;
+  models: AIModelInfo[];
+  modelsLoading: boolean;
+  modelSearch: string;
+  showModelList: boolean;
 }
 
-function providerPillStyle(provider: string, active: boolean): string {
-  const p = provider.toLowerCase();
-  if (provider === 'all') {
-    return active
-      ? 'border-violet-500/50 bg-violet-500/20 text-violet-200'
-      : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-primary)]';
-  }
-  return active
-    ? (PROVIDER_PILL_ACTIVE[p] ?? 'border-zinc-500/50 bg-zinc-500/20 text-zinc-200')
-    : (PROVIDER_PILL_INACTIVE[p] ?? 'border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-bg-hover)]');
-}
+// =============================================================================
+// CONFIGURAÇÃO ESTÁTICA DOS PROVIDERS
+// =============================================================================
 
-function providerDotColor(provider: string): string {
-  return PROVIDER_DOT[provider.toLowerCase()] ?? 'bg-zinc-400';
-}
+const PROVIDERS: { id: AiProvider; label: string; icon: string; color: string; placeholder: string }[] = [
+  {
+    id: 'google',
+    label: 'Google Gemini',
+    icon: '💎',
+    color: 'blue',
+    placeholder: 'AIza...',
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    icon: '🤖',
+    color: 'emerald',
+    placeholder: 'sk-...',
+  },
+];
+
+const COLOR_MAP: Record<string, string> = {
+  blue: 'border-blue-500/40 bg-blue-500/10 text-blue-300',
+  emerald: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+};
+
+const ACTIVE_COLOR: Record<string, string> = {
+  blue: 'border-blue-500/50 bg-blue-500/20 ring-1 ring-blue-500/30',
+  emerald: 'border-emerald-500/50 bg-emerald-500/20 ring-1 ring-emerald-500/30',
+};
+
+// =============================================================================
+// COMPONENTE PRINCIPAL
+// =============================================================================
 
 export function AIGatewayPanel() {
   const [loading, setLoading] = useState(true);
+  const [activeProvider, setActiveProvider] = useState<AiProvider>('google');
+  const [activeModel, setActiveModel] = useState('');
   const [saving, setSaving] = useState(false);
-  const [config, setConfig] = useState<AiGatewayConfig>(DEFAULT_AI_GATEWAY);
-  const [showPrimaryConfig, setShowPrimaryConfig] = useState(false);
-  const [showFallbackConfig, setShowFallbackConfig] = useState(false);
-  const [models, setModels] = useState<GatewayModel[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(false);
-  const [modelSearch, setModelSearch] = useState('');
-  const [primarySearch, setPrimarySearch] = useState('');
-  const [selectedPrimaryProvider, setSelectedPrimaryProvider] = useState('all');
 
-  const fetchConfig = useCallback(async () => {
+  const [providerState, setProviderState] = useState<Record<AiProvider, ProviderState>>({
+    google: {
+      isConfigured: false, tokenPreview: null, keyStatus: 'idle',
+      keyDraft: '', showKey: false, models: [], modelsLoading: false,
+      modelSearch: '', showModelList: false,
+    },
+    openai: {
+      isConfigured: false, tokenPreview: null, keyStatus: 'idle',
+      keyDraft: '', showKey: false, models: [], modelsLoading: false,
+      modelSearch: '', showModelList: false,
+    },
+  });
+
+  const updateProvider = (id: AiProvider, patch: Partial<ProviderState>) => {
+    setProviderState((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  };
+
+  // =============================================================================
+  // LOAD CONFIG
+  // =============================================================================
+
+  const loadConfig = useCallback(async () => {
     try {
       setLoading(true);
       const res = await fetch('/api/settings/ai');
       const data = await res.json();
-      if (data.gateway) setConfig(data.gateway);
+
+      if (data.provider) setActiveProvider(data.provider as AiProvider);
+      if (data.model) setActiveModel(data.model);
+
+      if (data.keys?.google) {
+        updateProvider('google', {
+          isConfigured: data.keys.google.isConfigured,
+          tokenPreview: data.keys.google.tokenPreview,
+        });
+      }
+      if (data.keys?.openai) {
+        updateProvider('openai', {
+          isConfigured: data.keys.openai.isConfigured,
+          tokenPreview: data.keys.openai.tokenPreview,
+        });
+      }
     } catch (error) {
-      console.error('Error fetching AI Gateway config:', error);
+      console.error('[AIGatewayPanel] load error:', error);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    void loadConfig();
+  }, [loadConfig]);
 
-  useEffect(() => {
-    if ((!showPrimaryConfig && !showFallbackConfig) || models.length > 0) return;
-    setModelsLoading(true);
-    fetch('/api/ai/gateway-models')
-      .then((r) => r.json())
-      .then((d) => setModels(d.models ?? []))
-      .catch(() => setModels([]))
-      .finally(() => setModelsLoading(false));
-  }, [showPrimaryConfig, showFallbackConfig, models.length]);
+  // =============================================================================
+  // FETCH MODELS (lazy)
+  // =============================================================================
 
-  // Providers únicos extraídos dos modelos (para pills)
-  const providers = useMemo(() => {
-    const unique = [...new Set(models.map((m) => m.provider))].sort();
-    return unique;
-  }, [models]);
-
-  // Modelos filtrados para o seletor primário
-  const filteredPrimary = useMemo(() => {
-    let list = selectedPrimaryProvider === 'all'
-      ? models
-      : models.filter((m) => m.provider === selectedPrimaryProvider);
-    if (primarySearch) {
-      const q = primarySearch.toLowerCase();
-      list = list.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
-    }
-    return list;
-  }, [models, selectedPrimaryProvider, primarySearch]);
-
-  // Modelos filtrados para fallback
-  const filteredFallback = useMemo(() => {
-    const selected = new Set(config.fallbackModels ?? []);
-    const q = modelSearch.toLowerCase();
-    const filtered = q
-      ? models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q))
-      : models;
-    // Não-selecionados primeiro, selecionados esmaecidos no final
-    return [...filtered].sort((a, b) => (selected.has(a.id) ? 1 : 0) - (selected.has(b.id) ? 1 : 0));
-  }, [models, modelSearch, config.fallbackModels]);
-
-  const handleSaveConfig = async (updates: Partial<AiGatewayConfig>) => {
-    setSaving(true);
+  const fetchModels = async (id: AiProvider) => {
+    updateProvider(id, { modelsLoading: true });
     try {
-      const newConfig = { ...config, ...updates };
+      const res = await fetch(`/api/ai/models?provider=${id}`);
+      const data = await res.json();
+      updateProvider(id, { models: data.models ?? [], modelsLoading: false });
+    } catch {
+      updateProvider(id, { models: [], modelsLoading: false });
+    }
+  };
+
+  // =============================================================================
+  // HANDLERS
+  // =============================================================================
+
+  const handleSaveKey = async (id: AiProvider) => {
+    const key = providerState[id].keyDraft.trim();
+    if (!key) { toast.error('Informe a chave'); return; }
+
+    updateProvider(id, { keyStatus: 'saving' });
+    try {
+      const body = id === 'google' ? { google_api_key: key } : { openai_api_key: key };
       const res = await fetch('/api/settings/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gateway: newConfig }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (data.success) {
-        setConfig(newConfig);
-        toast.success('Configuração salva!');
-        return true;
-      } else {
-        toast.error(data.error || 'Erro ao salvar');
-        return false;
-      }
+      if (!res.ok) throw new Error(data.error || 'Erro ao salvar');
+
+      updateProvider(id, { keyStatus: 'valid', keyDraft: '', isConfigured: true });
+      toast.success(`Chave ${id === 'google' ? 'Google' : 'OpenAI'} salva`);
+      await loadConfig();
+      // Carrega modelos com a nova chave
+      void fetchModels(id);
     } catch (error) {
-      console.error('Error saving AI Gateway config:', error);
-      toast.error('Erro ao salvar configuração');
-      return false;
+      updateProvider(id, { keyStatus: 'invalid' });
+      const message = error instanceof Error ? error.message : 'Erro ao salvar chave';
+      toast.error(message);
+    }
+  };
+
+  const handleRemoveKey = async (id: AiProvider) => {
+    try {
+      const res = await fetch(`/api/settings/ai?provider=${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Erro ao remover chave');
+      updateProvider(id, { isConfigured: false, tokenPreview: null, models: [], keyStatus: 'idle' });
+      toast.success(`Chave ${id === 'google' ? 'Google' : 'OpenAI'} removida`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao remover chave';
+      toast.error(message);
+    }
+  };
+
+  const handleSelectModel = async (modelId: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId }),
+      });
+      if (!res.ok) throw new Error('Erro ao salvar modelo');
+      setActiveModel(modelId);
+      updateProvider(activeProvider, { showModelList: false, modelSearch: '' });
+      toast.success('Modelo atualizado');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao salvar modelo';
+      toast.error(message);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleToggle = async (enabled: boolean) => {
-    if (enabled) {
-      try {
-        await fetch('/api/settings/helicone', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: false }),
-        });
-      } catch (error) {
-        console.error('Error disabling Helicone:', error);
-      }
+  const handleSelectProvider = async (id: AiProvider) => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/settings/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: id }),
+      });
+      if (!res.ok) throw new Error('Erro ao salvar provider');
+      setActiveProvider(id);
+      setActiveModel('');
+      toast.success(`Provider alterado para ${id === 'google' ? 'Google' : 'OpenAI'}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao salvar provider';
+      toast.error(message);
+    } finally {
+      setSaving(false);
     }
-    await handleSaveConfig({ enabled });
   };
 
-  const handleToggleFallbackModel = (modelId: string) => {
-    const currentModels = config.fallbackModels || [];
-    const newModels = currentModels.includes(modelId)
-      ? currentModels.filter((m) => m !== modelId)
-      : [...currentModels, modelId];
-    handleSaveConfig({ fallbackModels: newModels });
+  const toggleModelList = (id: AiProvider) => {
+    const ps = providerState[id];
+    const next = !ps.showModelList;
+    updateProvider(id, { showModelList: next });
+    if (next && ps.models.length === 0 && ps.isConfigured) {
+      void fetchModels(id);
+    }
   };
+
+  // =============================================================================
+  // RENDER
+  // =============================================================================
 
   if (loading) {
     return (
@@ -198,330 +249,255 @@ export function AIGatewayPanel() {
   }
 
   return (
-    <section className="glass-panel rounded-2xl p-6">
+    <section className="glass-panel rounded-2xl p-6 space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ds-text-primary)]">
-            <Route className="size-4 text-violet-400" />
-            AI Gateway (Vercel)
-          </div>
-          <p className="text-sm text-[var(--ds-text-secondary)]">
-            Roteamento inteligente com fallbacks automáticos entre providers.
-          </p>
+      <div className="space-y-1">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[var(--ds-text-primary)]">
+          <Cpu className="size-4 text-emerald-400" />
+          Providers de IA
         </div>
-
-        {/* Toggle */}
-        <div className="flex items-center gap-3">
-          {config.enabled && (
-            <span className="rounded-full bg-violet-500/20 px-2.5 py-1 text-xs font-medium text-violet-300">
-              Ativo
-            </span>
-          )}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={config.enabled}
-            aria-label="Habilitar AI Gateway"
-            disabled={saving}
-            onClick={() => handleToggle(!config.enabled)}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full border transition ${
-              config.enabled
-                ? 'border-violet-500/40 bg-violet-500/20'
-                : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-hover)]'
-            } ${saving ? 'cursor-not-allowed opacity-60' : ''}`}
-          >
-            <span
-              className={`inline-block size-4 rounded-full transition ${
-                config.enabled ? 'translate-x-6 bg-violet-300' : 'translate-x-1 bg-[var(--ds-text-muted)]'
-              }`}
-            />
-          </button>
-        </div>
+        <p className="text-sm text-[var(--ds-text-secondary)]">
+          Configure suas chaves de API. Cada cliente paga diretamente ao provider.
+        </p>
       </div>
 
-      {/* Config */}
-      <div className="mt-5 space-y-4">
-        {/* ── Primary Model Selector ── */}
-        <div className="rounded-xl border border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)] p-4">
-          <button
-            type="button"
-            onClick={() => { setShowPrimaryConfig(!showPrimaryConfig); setPrimarySearch(''); }}
-            className="flex w-full items-center justify-between"
-          >
-            <div>
-              <div className="text-sm font-medium text-[var(--ds-text-primary)] text-left">Modelo Principal</div>
-              <div className="text-xs text-[var(--ds-text-muted)] mt-0.5 text-left">
-                {config.primaryModel
-                  ? (models.find((m) => m.id === config.primaryModel)?.name ?? config.primaryModel.split('/').pop() ?? config.primaryModel)
-                  : 'Nenhum selecionado'}
-              </div>
-            </div>
-            <ChevronDown
-              className={`size-4 text-[var(--ds-text-muted)] transition-transform ${showPrimaryConfig ? 'rotate-180' : ''}`}
-            />
-          </button>
+      {/* Provider cards */}
+      <div className="space-y-4">
+        {PROVIDERS.map(({ id, label, icon, color, placeholder }) => {
+          const ps = providerState[id];
+          const isActive = activeProvider === id;
+          const filteredModels = ps.modelSearch
+            ? ps.models.filter(
+                (m) =>
+                  m.name.toLowerCase().includes(ps.modelSearch.toLowerCase()) ||
+                  m.id.toLowerCase().includes(ps.modelSearch.toLowerCase())
+              )
+            : ps.models;
 
-          {showPrimaryConfig && (
-            <div className="mt-4 border-t border-[var(--ds-border-subtle)] pt-4 space-y-3">
-              {modelsLoading ? (
-                <div className="flex items-center gap-2 py-3 text-[var(--ds-text-muted)]">
-                  <Loader2 size={14} className="animate-spin" />
-                  <span className="text-xs">Carregando modelos...</span>
-                </div>
-              ) : (
-                <>
-                  {/* Provider pills */}
-                  <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                    {['all', ...providers].map((p) => {
-                      const active = selectedPrimaryProvider === p;
-                      return (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => { setSelectedPrimaryProvider(p); setPrimarySearch(''); }}
-                          className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${providerPillStyle(p, active)}`}
-                        >
-                          {p === 'all' ? 'Todos' : providerDisplayName(p)}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Search */}
-                  <div className="relative">
-                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)]" />
-                    <input
-                      type="text"
-                      placeholder={selectedPrimaryProvider === 'all' ? 'Buscar entre todos os modelos...' : `Buscar em ${providerDisplayName(selectedPrimaryProvider)}...`}
-                      value={primarySearch}
-                      onChange={(e) => setPrimarySearch(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus:ring-1 focus:ring-violet-500/40"
-                    />
-                  </div>
-
-                  {/* Model list */}
-                  <div className="max-h-60 space-y-1 overflow-y-auto pr-1">
-                    {filteredPrimary.length === 0 ? (
-                      <p className="py-3 text-center text-xs text-[var(--ds-text-muted)]">Nenhum modelo encontrado</p>
-                    ) : (
-                      filteredPrimary.map((model) => {
-                        const isSelected = model.id === config.primaryModel;
-                        return (
-                          <button
-                            key={model.id}
-                            type="button"
-                            onClick={() => { handleSaveConfig({ primaryModel: model.id }); setShowPrimaryConfig(false); }}
-                            disabled={saving}
-                            className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 transition ${
-                              isSelected
-                                ? 'border-violet-500/40 bg-violet-500/10'
-                                : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] hover:bg-[var(--ds-bg-hover)]'
-                            } ${saving ? 'cursor-not-allowed' : ''}`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              {/* Radio indicator */}
-                              <div
-                                className={`flex size-4 shrink-0 items-center justify-center rounded-full border transition ${
-                                  isSelected ? 'border-violet-500 bg-violet-500' : 'border-[var(--ds-border-default)]'
-                                }`}
-                              >
-                                {isSelected && <div className="size-2 rounded-full bg-white" />}
-                              </div>
-                              <div className="text-left">
-                                <div className="text-xs font-medium text-[var(--ds-text-primary)]">{model.name}</div>
-                                {selectedPrimaryProvider === 'all' && (
-                                  <div className="text-[10px] text-[var(--ds-text-muted)]">{providerDisplayName(model.provider)}</div>
-                                )}
-                              </div>
-                            </div>
-                            <code className="shrink-0 rounded bg-[var(--ds-bg-hover)] px-1.5 py-0.5 text-[10px] text-[var(--ds-text-muted)]">
-                              {model.id}
-                            </code>
-                          </button>
-                        );
-                      })
-                    )}
-                    {primarySearch && (
-                      <p className="pt-1 text-center text-[10px] text-[var(--ds-text-muted)]">
-                        {filteredPrimary.length} de {selectedPrimaryProvider === 'all' ? models.length : models.filter(m => m.provider === selectedPrimaryProvider).length} modelos
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── BYOK Link ── */}
-        {config.enabled && (
-          <div className="rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-elevated)] p-3">
-            <p className="text-[11px] text-[var(--ds-text-secondary)]">
-              Para usar suas próprias chaves de API (BYOK), adicione-as no{' '}
-              <a
-                href={
-                  process.env.NEXT_PUBLIC_VERCEL_TEAM && process.env.NEXT_PUBLIC_VERCEL_PROJECT
-                    ? `https://vercel.com/${process.env.NEXT_PUBLIC_VERCEL_TEAM}/${process.env.NEXT_PUBLIC_VERCEL_PROJECT}/ai-gateway/byok`
-                    : 'https://vercel.com/dashboard'
-                }
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-emerald-400 underline hover:text-emerald-300"
-              >
-                Vercel AI Gateway → BYOK
-                <ExternalLink size={10} />
-              </a>
-              . O SmartZap as usa automaticamente — sem markup de custo.
-            </p>
-          </div>
-        )}
-
-        {/* Aviso quando IA desativada */}
-        {!config.enabled && (
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
-            <p className="text-xs text-amber-400">
-              IA desativada — respostas automáticas não funcionarão.
-            </p>
-          </div>
-        )}
-
-        {/* ── Fallback Models ── */}
-        {config.enabled && (
-          <div className="rounded-xl border border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)] p-4">
-            <button
-              type="button"
-              onClick={() => setShowFallbackConfig(!showFallbackConfig)}
-              className="flex w-full items-center justify-between"
+          return (
+            <div
+              key={id}
+              className={`rounded-xl border p-4 transition ${
+                isActive
+                  ? ACTIVE_COLOR[color]
+                  : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)]'
+              }`}
             >
-              <div>
-                <div className="text-sm font-medium text-[var(--ds-text-primary)] text-left">Modelos de Fallback</div>
-                <div className="text-xs text-[var(--ds-text-muted)] mt-0.5 text-left">
-                  {config.fallbackModels?.length || 0} modelos selecionados
+              {/* Card header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">{icon}</span>
+                  <span className="text-sm font-medium text-[var(--ds-text-primary)]">{label}</span>
+                  {ps.isConfigured && (
+                    <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400">
+                      Configurado
+                    </span>
+                  )}
                 </div>
-              </div>
-              <ChevronDown
-                className={`size-4 text-[var(--ds-text-muted)] transition-transform ${showFallbackConfig ? 'rotate-180' : ''}`}
-              />
-            </button>
 
-            {showFallbackConfig && (
-              <div className="mt-4 border-t border-[var(--ds-border-subtle)] pt-4 space-y-3">
-                {/* Chips selecionados com badge de provider */}
-                {(config.fallbackModels?.length ?? 0) > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {(config.fallbackModels ?? []).map((id) => {
-                      const model = models.find((m) => m.id === id);
-                      const label = model?.name ?? id.split('/').pop() ?? id;
-                      const provider = model?.provider ?? id.split('/')[0] ?? '';
-                      return (
-                        <span
-                          key={id}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[11px] text-violet-300"
-                        >
-                          <span className={`size-1.5 shrink-0 rounded-full ${providerDotColor(provider)}`} />
-                          {label}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleFallbackModel(id)}
-                            disabled={saving}
-                            aria-label={`Remover ${label}`}
-                            className="text-violet-400 hover:text-white disabled:opacity-50 leading-none"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      );
-                    })}
-                  </div>
+                {/* Active provider button */}
+                {!isActive && ps.isConfigured && (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => handleSelectProvider(id)}
+                    className="rounded-lg border border-[var(--ds-border-default)] px-3 py-1 text-xs text-[var(--ds-text-secondary)] transition hover:bg-[var(--ds-bg-hover)] disabled:opacity-50"
+                  >
+                    Usar este
+                  </button>
                 )}
+                {isActive && (
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${COLOR_MAP[color]}`}>
+                    Ativo
+                  </span>
+                )}
+              </div>
 
-                {/* Busca */}
-                <div className="relative">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)]" />
-                  <input
-                    type="text"
-                    placeholder="Buscar modelos para adicionar..."
-                    value={modelSearch}
-                    onChange={(e) => setModelSearch(e.target.value)}
-                    className="w-full rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] py-1.5 pl-8 pr-3 text-xs text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus:ring-1 focus:ring-violet-500/40"
-                  />
-                </div>
-
-                {modelsLoading ? (
-                  <div className="flex items-center gap-2 py-3 text-[var(--ds-text-muted)]">
-                    <Loader2 size={14} className="animate-spin" />
-                    <span className="text-xs">Carregando modelos...</span>
+              {/* API Key section */}
+              <div className="mt-3 space-y-2">
+                {ps.isConfigured && ps.tokenPreview ? (
+                  <div className="flex items-center justify-between rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-surface)] px-3 py-2">
+                    <code className="text-xs text-[var(--ds-text-secondary)]">{ps.tokenPreview}</code>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveKey(id)}
+                      className="text-[var(--ds-text-muted)] transition hover:text-red-400"
+                      aria-label="Remover chave"
+                    >
+                      <X size={13} />
+                    </button>
                   </div>
                 ) : (
-                  <div className="max-h-60 space-y-1 overflow-y-auto pr-1">
-                    {filteredFallback.map((model) => {
-                      const isSelected = (config.fallbackModels ?? []).includes(model.id);
-                      return (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => handleToggleFallbackModel(model.id)}
-                          disabled={saving}
-                          className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 transition ${
-                            isSelected
-                              ? 'border-violet-500/20 bg-violet-500/5 opacity-50'
-                              : 'border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] hover:bg-[var(--ds-bg-hover)]'
-                          } ${saving ? 'cursor-not-allowed' : ''}`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div
-                              className={`flex size-4 shrink-0 items-center justify-center rounded border transition ${
-                                isSelected ? 'border-violet-500 bg-violet-500' : 'border-[var(--ds-border-default)]'
-                              }`}
-                            >
-                              {isSelected && <Check size={10} className="text-white" />}
-                            </div>
-                            <div className="flex items-center gap-2 text-left">
-                              <span className={`size-1.5 shrink-0 rounded-full ${providerDotColor(model.provider)}`} />
-                              <div>
-                                <div className="text-xs font-medium text-[var(--ds-text-primary)]">{model.name}</div>
-                                <div className="text-[10px] text-[var(--ds-text-muted)]">{providerDisplayName(model.provider)}</div>
-                              </div>
-                            </div>
-                          </div>
-                          <code className="shrink-0 rounded bg-[var(--ds-bg-hover)] px-1.5 py-0.5 text-[10px] text-[var(--ds-text-muted)]">
-                            {model.id}
-                          </code>
-                        </button>
-                      );
-                    })}
-                    {modelSearch && (
-                      <p className="pt-1 text-center text-[10px] text-[var(--ds-text-muted)]">
-                        {filteredFallback.length} de {models.length} modelos
-                      </p>
-                    )}
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={ps.showKey ? 'text' : 'password'}
+                        value={ps.keyDraft}
+                        onChange={(e) => updateProvider(id, { keyDraft: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveKey(id); }}
+                        placeholder={placeholder}
+                        className="w-full rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] px-3 py-1.5 pr-9 text-xs text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus:ring-1 focus:ring-emerald-500/40"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => updateProvider(id, { showKey: !ps.showKey })}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-secondary)]"
+                        aria-label={ps.showKey ? 'Ocultar chave' : 'Mostrar chave'}
+                      >
+                        {ps.showKey ? <EyeOff size={12} /> : <Eye size={12} />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={ps.keyStatus === 'saving' || !ps.keyDraft.trim()}
+                      onClick={() => void handleSaveKey(id)}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                    >
+                      {ps.keyStatus === 'saving' ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Check size={12} />
+                      )}
+                      Salvar
+                    </button>
                   </div>
                 )}
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Benefits info */}
-        {config.enabled && (
-          <div className="flex items-start gap-2 rounded-lg border border-[var(--ds-border-subtle)] bg-[var(--ds-bg-tertiary)] p-3 text-xs text-[var(--ds-text-secondary)]">
-            <Info className="mt-0.5 size-4 shrink-0 text-violet-300/60" />
-            <div>
-              <p>Com o AI Gateway ativo, você tem:</p>
-              <ul className="mt-1 space-y-0.5 text-[var(--ds-text-muted)]">
-                <li>• Fallbacks automáticos entre providers</li>
-                <li>• Roteamento inteligente baseado em latência</li>
-                <li>• Observability centralizada no dashboard Vercel</li>
-                <li>• BYOK nativo — configure suas chaves no dashboard Vercel</li>
-              </ul>
-              <p className="mt-2 text-amber-300/80">
-                <strong>Nota:</strong> Gateway e Helicone são mutuamente exclusivos. Ativar um desativa o outro automaticamente.
-              </p>
+                {ps.keyStatus === 'invalid' && (
+                  <p className="text-[11px] text-red-400">Chave inválida — verifique e tente novamente.</p>
+                )}
+              </div>
+
+              {/* Model selector — só aparece se configurado */}
+              {ps.isConfigured && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleModelList(id)}
+                    className="flex w-full items-center justify-between rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] px-3 py-2"
+                  >
+                    <div className="text-left">
+                      <div className="text-[11px] text-[var(--ds-text-muted)]">Modelo ativo</div>
+                      <div className="text-xs font-medium text-[var(--ds-text-primary)]">
+                        {isActive && activeModel
+                          ? (ps.models.find((m) => m.id === activeModel)?.name ?? activeModel)
+                          : 'Selecionar modelo'}
+                      </div>
+                    </div>
+                    <ChevronDown
+                      className={`size-4 text-[var(--ds-text-muted)] transition-transform ${ps.showModelList ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+
+                  {ps.showModelList && (
+                    <div className="mt-2 rounded-lg border border-[var(--ds-border-default)] bg-[var(--ds-bg-surface)] p-2 space-y-2">
+                      {/* Search */}
+                      <div className="relative">
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)]" />
+                        <input
+                          type="text"
+                          placeholder="Buscar modelo..."
+                          value={ps.modelSearch}
+                          onChange={(e) => updateProvider(id, { modelSearch: e.target.value })}
+                          className="w-full rounded-md border border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)] py-1.5 pl-8 pr-3 text-xs text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Model list */}
+                      {ps.modelsLoading ? (
+                        <div className="flex items-center justify-center gap-2 py-4 text-[var(--ds-text-muted)]">
+                          <Loader2 size={13} className="animate-spin" />
+                          <span className="text-xs">Carregando modelos...</span>
+                        </div>
+                      ) : filteredModels.length === 0 ? (
+                        <p className="py-3 text-center text-xs text-[var(--ds-text-muted)]">
+                          Nenhum modelo encontrado
+                        </p>
+                      ) : (
+                        <>
+                          {/* Aliases (auto-atualizados) */}
+                          {filteredModels.some((m) => m.isAlias) && (
+                            <div>
+                              <div className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ds-text-muted)]">
+                                Sempre atualizado
+                              </div>
+                              <div className="space-y-0.5">
+                                {filteredModels.filter((m) => m.isAlias).map((m) => (
+                                  <ModelRow
+                                    key={m.id}
+                                    model={m}
+                                    isSelected={isActive && activeModel === m.id}
+                                    disabled={saving}
+                                    onSelect={handleSelectModel}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Versões fixas */}
+                          {filteredModels.some((m) => !m.isAlias) && (
+                            <div>
+                              <div className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ds-text-muted)]">
+                                Versões fixas
+                              </div>
+                              <div className="max-h-48 space-y-0.5 overflow-y-auto pr-0.5">
+                                {filteredModels.filter((m) => !m.isAlias).map((m) => (
+                                  <ModelRow
+                                    key={m.id}
+                                    model={m}
+                                    isSelected={isActive && activeModel === m.id}
+                                    disabled={saving}
+                                    onSelect={handleSelectModel}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })}
       </div>
     </section>
+  );
+}
+
+// =============================================================================
+// SUB-COMPONENTE: linha de modelo
+// =============================================================================
+
+function ModelRow({
+  model,
+  isSelected,
+  disabled,
+  onSelect,
+}: {
+  model: AIModelInfo;
+  isSelected: boolean;
+  disabled: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onSelect(model.id)}
+      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 transition ${
+        isSelected
+          ? 'bg-emerald-500/10 text-emerald-300'
+          : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-bg-hover)]'
+      } disabled:cursor-not-allowed disabled:opacity-50`}
+    >
+      <span className="text-xs">{model.name}</span>
+      <code className="shrink-0 rounded bg-[var(--ds-bg-elevated)] px-1.5 py-0.5 text-[10px] text-[var(--ds-text-muted)]">
+        {model.id}
+      </code>
+    </button>
   );
 }

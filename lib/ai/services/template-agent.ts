@@ -1,5 +1,8 @@
-import { generateText, gateway } from 'ai'
-import { DEFAULT_MODEL_ID, normalizeToGatewayModelId } from '../model'
+import { generateText } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
+import { DEFAULT_MODEL_ID } from '../model'
+import { getAiDirectConfig } from '../ai-center-config'
 
 // ============================================================================
 // TEMPLATE CATEGORIES
@@ -176,10 +179,20 @@ export async function generateTemplatesWithAgent(
     options: AgentOptions
 ): Promise<AgentGenerationResult> {
     const startTime = Date.now()
-    const modelId = normalizeToGatewayModelId(options.model || DEFAULT_MODEL_ID)
-    const model = gateway(modelId)
+    const config = await getAiDirectConfig()
+    const targetModelId = options.model || config.model || DEFAULT_MODEL_ID
+    let model
+    if (config.provider === 'google') {
+        if (!config.googleApiKey) throw new Error('Chave Google não configurada. Acesse Configurações → IA.')
+        const google = createGoogleGenerativeAI({ apiKey: config.googleApiKey })
+        model = google(targetModelId)
+    } else {
+        if (!config.openaiApiKey) throw new Error('Chave OpenAI não configurada. Acesse Configurações → IA.')
+        const openai = createOpenAI({ apiKey: config.openaiApiKey })
+        model = openai(targetModelId)
+    }
 
-    console.log(`[TEMPLATE_AGENT] Using model: ${modelId} (via Gateway)`)
+    console.log(`[TEMPLATE_AGENT] Using model: ${targetModelId} (provider: ${config.provider})`)
 
     // Default to 'bypass' if not provided
     const strategy = options.strategy || 'bypass'

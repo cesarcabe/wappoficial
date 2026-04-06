@@ -10,10 +10,6 @@ interface HeliconeConfig {
   apiKeyPreview: string | null;
 }
 
-interface GatewayStatus {
-  enabled: boolean;
-}
-
 /**
  * HeliconePanel - Configuração de observability de IA via Helicone
  *
@@ -29,7 +25,6 @@ export function HeliconePanel() {
     hasApiKey: false,
     apiKeyPreview: null,
   });
-  const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>({ enabled: false });
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
@@ -38,21 +33,11 @@ export function HeliconePanel() {
     try {
       setLoading(true);
 
-      // Busca config do Helicone e status do Gateway em paralelo
-      const [heliconeRes, gatewayRes] = await Promise.all([
-        fetch('/api/settings/helicone'),
-        fetch('/api/settings/ai'),
-      ]);
-
+      const heliconeRes = await fetch('/api/settings/helicone');
       const heliconeData = await heliconeRes.json();
-      const gatewayData = await gatewayRes.json();
 
       if (heliconeData.ok) {
         setConfig(heliconeData.config);
-      }
-
-      if (gatewayData.gateway) {
-        setGatewayStatus({ enabled: gatewayData.gateway.enabled });
       }
     } catch (error) {
       console.error('Error fetching Helicone config:', error);
@@ -70,20 +55,6 @@ export function HeliconePanel() {
     if (enabled && !config.hasApiKey) {
       setShowApiKeyInput(true);
       return;
-    }
-
-    // Se habilitando o Helicone, desativa o Gateway automaticamente
-    if (enabled && gatewayStatus.enabled) {
-      try {
-        await fetch('/api/settings/ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gateway: { enabled: false } }),
-        });
-        setGatewayStatus({ enabled: false });
-      } catch (error) {
-        console.error('Error disabling Gateway:', error);
-      }
     }
 
     setSaving(true);
@@ -234,22 +205,6 @@ export function HeliconePanel() {
 
       {/* Config Status / API Key Input */}
       <div className="mt-5 space-y-4">
-        {/* Gateway active warning */}
-        {gatewayStatus.enabled && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <div className="flex items-start gap-3">
-              <Info className="size-5 shrink-0 text-amber-400 mt-0.5" />
-              <div>
-                <div className="text-sm font-medium text-amber-200">AI Gateway está ativo</div>
-                <p className="text-xs text-amber-300/70 mt-1">
-                  O Helicone está desativado porque o AI Gateway está em uso.
-                  Para usar o Helicone, desative o Gateway primeiro ou ative o Helicone para desativar o Gateway automaticamente.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Configured status */}
         {config.hasApiKey && !showApiKeyInput && (
           <div className="rounded-xl border border-[var(--ds-border-default)] bg-[var(--ds-bg-elevated)] p-4">

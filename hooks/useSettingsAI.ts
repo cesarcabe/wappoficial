@@ -1,153 +1,120 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AI_PROVIDERS, type AIProvider } from '@/lib/ai/providers'
+import { useCallback, useEffect, useState } from 'react'
+import type { AIProvider } from '@/lib/ai/providers'
 import { useDevMode } from '@/components/providers/DevModeProvider'
 import { DEFAULT_MODEL_ID } from '@/lib/ai/model'
 import {
-  DEFAULT_AI_FALLBACK,
   DEFAULT_AI_PROMPTS,
   DEFAULT_AI_ROUTES,
-  type AiFallbackConfig,
   type AiPromptsConfig,
   type AiRoutesConfig,
+  type AiProviderType,
 } from '@/lib/ai/ai-center-defaults'
-import { settingsService, type OCRConfig, type OCRProviderType } from '@/services/settingsService'
+import { settingsService, type OCRConfig } from '@/services/settingsService'
+import type { AIModelInfo } from '@/app/api/ai/models/route'
 import { toast } from 'sonner'
 
+// =============================================================================
+// TIPOS
+// =============================================================================
+
+type KeyStatus = 'unknown' | 'valid' | 'invalid' | 'saving'
+
+type KeyState = {
+  isConfigured: boolean
+  tokenPreview: string | null
+  status: KeyStatus
+}
+
 type AIConfigResponse = {
-  provider: AIProvider
+  provider: AiProviderType
   model: string
   routes: AiRoutesConfig
   prompts: AiPromptsConfig
-  fallback: AiFallbackConfig
+  keys: {
+    google: { isConfigured: boolean; source: string; tokenPreview: string | null }
+    openai: { isConfigured: boolean; source: string; tokenPreview: string | null }
+  }
   ocr?: OCRConfig
+}
+
+const DEFAULT_KEY_STATE: KeyState = {
+  isConfigured: false,
+  tokenPreview: null,
+  status: 'unknown',
 }
 
 const DEFAULT_OCR_CONFIG: OCRConfig = {
   provider: 'gemini',
-  geminiModel: 'gemini-3-flash-preview',
-  mistralStatus: {
-    isConfigured: false,
-    source: 'none',
-    tokenPreview: null,
-  },
+  geminiModel: 'gemini-2.5-flash',
 }
 
-const getProviderConfig = (providerId: AIProvider) =>
-  AI_PROVIDERS.find((provider) => provider.id === providerId)
-
-const getProviderLabel = (providerId: AIProvider) =>
-  getProviderConfig(providerId)?.name ?? providerId
-
-const getDefaultModelId = (providerId: AIProvider) => {
-  if (providerId === 'google') {
-    return DEFAULT_MODEL_ID
-  }
-  return getProviderConfig(providerId)?.models[0]?.id ?? ''
-}
-
-const getModelLabel = (providerId: AIProvider, modelId: string) => {
-  const provider = getProviderConfig(providerId)
-  return provider?.models.find((model) => model.id === modelId)?.name ?? modelId
-}
-
-const getSafeProvider = (provider?: string): AIProvider =>
-  getProviderConfig(provider as AIProvider)?.id ?? 'google'
-
-const getModelOptions = (providerId: AIProvider, currentModelId: string) => {
-  const provider = getProviderConfig(providerId)
-  const models = provider?.models ?? []
-  if (currentModelId && !models.some((model) => model.id === currentModelId)) {
-    return [...models, { id: currentModelId, name: currentModelId }]
-  }
-  return models
-}
-
-const normalizeProviderOrder = (order: AIProvider[]) => {
-  const uniqueOrder = Array.from(new Set(order))
-  const missing = AI_PROVIDERS.map((provider) => provider.id).filter(
-    (provider) => !uniqueOrder.includes(provider)
-  )
-  return [...uniqueOrder, ...missing]
-}
+// =============================================================================
+// CONTROLLER HOOK
+// =============================================================================
 
 export const useSettingsAIController = () => {
   const { isDevMode } = useDevMode()
 
-  const [provider, setProvider] = useState<AIProvider>('google')
-  const [model, setModel] = useState(() => getDefaultModelId('google'))
+  const [provider, setProvider] = useState<AiProviderType>('google')
+  const [model, setModel] = useState(DEFAULT_MODEL_ID)
   const [routes, setRoutes] = useState<AiRoutesConfig>(DEFAULT_AI_ROUTES)
   const [prompts, setPrompts] = useState<AiPromptsConfig>(DEFAULT_AI_PROMPTS)
-  const [fallback, setFallback] = useState<AiFallbackConfig>(DEFAULT_AI_FALLBACK)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  // API keys
+  const [googleKey, setGoogleKey] = useState<KeyState>(DEFAULT_KEY_STATE)
+  const [openaiKey, setOpenaiKey] = useState<KeyState>(DEFAULT_KEY_STATE)
+  const [googleKeyDraft, setGoogleKeyDraft] = useState('')
+  const [openaiKeyDraft, setOpenaiKeyDraft] = useState('')
+
+  // Modelos dinâmicos do provider
+  const [models, setModels] = useState<AIModelInfo[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+
   // OCR State
   const [ocrConfig, setOcrConfig] = useState<OCRConfig>(DEFAULT_OCR_CONFIG)
-  const [mistralKeyDraft, setMistralKeyDraft] = useState('')
   const [isSavingOcr, setIsSavingOcr] = useState(false)
-  const [showMistralKeyInput, setShowMistralKeyInput] = useState(false)
 
   // Collapsible sections
   const [isStrategiesOpen, setIsStrategiesOpen] = useState(false)
 
-  const primaryProviderLabel = useMemo(() => getProviderLabel(provider), [provider])
-  const primaryModelLabel = useMemo(
-    () => (model ? getModelLabel(provider, model) : '—'),
-    [provider, model]
-  )
-
-  const fallbackSummary = useMemo(() => {
-    if (!fallback.enabled || fallback.order.length === 0) {
-      return 'Desativado'
-    }
-    return fallback.order.map((item) => getProviderLabel(item)).join(' -> ')
-  }, [fallback.enabled, fallback.order])
-
-  const primaryModelOptions = useMemo(
-    () => getModelOptions(provider, model),
-    [provider, model]
-  )
+  // =============================================================================
+  // LOAD CONFIG
+  // =============================================================================
 
   const loadConfig = useCallback(async () => {
     setIsLoading(true)
     setErrorMessage(null)
     try {
       const data = (await settingsService.getAIConfig()) as AIConfigResponse
-      const nextProvider = getSafeProvider(data.provider)
-      const nextModel = data.model?.trim() ? data.model : getDefaultModelId(nextProvider)
-      const fallbackFromApi = data.fallback ?? DEFAULT_AI_FALLBACK
-      const allowedProviders = AI_PROVIDERS.map((item) => item.id)
-      const fallbackOrder = Array.isArray(fallbackFromApi.order)
-        ? fallbackFromApi.order.filter((item) => allowedProviders.includes(item))
-        : []
-      const normalizedFallbackOrder = normalizeProviderOrder(
-        fallbackOrder.length > 0 ? fallbackOrder : DEFAULT_AI_FALLBACK.order
-      )
-      const fallbackModels = {
-        ...DEFAULT_AI_FALLBACK.models,
-        ...(fallbackFromApi.models || {}),
-      }
+      const nextProvider: AiProviderType =
+        data.provider === 'openai' ? 'openai' : 'google'
+      const nextModel = data.model?.trim() ? data.model : DEFAULT_MODEL_ID
 
       setProvider(nextProvider)
       setModel(nextModel)
       setRoutes({ ...DEFAULT_AI_ROUTES, ...(data.routes ?? {}) })
       setPrompts({ ...DEFAULT_AI_PROMPTS, ...(data.prompts ?? {}) })
-      setFallback({
-        ...DEFAULT_AI_FALLBACK,
-        ...fallbackFromApi,
-        order: normalizedFallbackOrder,
-        models: fallbackModels,
+
+      setGoogleKey({
+        isConfigured: data.keys?.google?.isConfigured ?? false,
+        tokenPreview: data.keys?.google?.tokenPreview ?? null,
+        status: 'unknown',
+      })
+      setOpenaiKey({
+        isConfigured: data.keys?.openai?.isConfigured ?? false,
+        tokenPreview: data.keys?.openai?.tokenPreview ?? null,
+        status: 'unknown',
       })
 
-      if (data.ocr) {
-        setOcrConfig(data.ocr)
-      }
+      if (data.ocr) setOcrConfig(data.ocr)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Erro ao carregar configuracoes de IA'
+        error instanceof Error ? error.message : 'Erro ao carregar configurações de IA'
       setErrorMessage(message)
       toast.error(message)
     } finally {
@@ -159,49 +126,109 @@ export const useSettingsAIController = () => {
     void loadConfig()
   }, [loadConfig])
 
-  const handleProviderSelect = (nextProvider: AIProvider) => {
-    setProvider(nextProvider)
-    const savedModel = fallback.models?.[nextProvider]
-    const nextModel = savedModel || getDefaultModelId(nextProvider)
-    setModel(nextModel)
-    setFallback((current) => {
-      const currentOrder = normalizeProviderOrder(current.order)
-      return {
-        ...current,
-        order: [nextProvider, ...currentOrder.filter((item) => item !== nextProvider)],
+  // =============================================================================
+  // FETCH MODELS (lazy — apenas quando painel expande)
+  // =============================================================================
+
+  const fetchModels = useCallback(
+    async (targetProvider: AiProviderType) => {
+      setModelsLoading(true)
+      try {
+        const res = await fetch(`/api/ai/models?provider=${targetProvider}`)
+        if (res.ok) {
+          const data = await res.json()
+          setModels(data.models ?? [])
+        }
+      } catch {
+        // silencioso — usa lista vazia
+      } finally {
+        setModelsLoading(false)
       }
-    })
+    },
+    []
+  )
+
+  // =============================================================================
+  // HANDLERS — chaves de API
+  // =============================================================================
+
+  const handleSaveGoogleKey = async () => {
+    const apiKey = googleKeyDraft.trim()
+    if (!apiKey) {
+      toast.error('Informe a chave do Google')
+      return
+    }
+    setGoogleKey((k) => ({ ...k, status: 'saving' }))
+    try {
+      await settingsService.saveAIConfig({ google_api_key: apiKey })
+      setGoogleKeyDraft('')
+      toast.success('Chave Google salva')
+      await loadConfig()
+      // Recarrega modelos com a nova chave
+      void fetchModels('google')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao salvar chave Google'
+      setGoogleKey((k) => ({ ...k, status: 'invalid' }))
+      toast.error(message)
+    }
   }
 
-  const handleFallbackMove = (target: AIProvider, direction: -1 | 1) => {
-    setFallback((current) => {
-      const currentOrder = normalizeProviderOrder(current.order)
-      const index = currentOrder.indexOf(target)
-      if (index < 0) return current
-      const nextIndex = index + direction
-      if (nextIndex < 0 || nextIndex >= currentOrder.length) return current
-      const nextOrder = [...currentOrder]
-      ;[nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]]
-      return { ...current, order: nextOrder }
-    })
+  const handleSaveOpenAIKey = async () => {
+    const apiKey = openaiKeyDraft.trim()
+    if (!apiKey) {
+      toast.error('Informe a chave da OpenAI')
+      return
+    }
+    setOpenaiKey((k) => ({ ...k, status: 'saving' }))
+    try {
+      await settingsService.saveAIConfig({ openai_api_key: apiKey })
+      setOpenaiKeyDraft('')
+      toast.success('Chave OpenAI salva')
+      await loadConfig()
+      void fetchModels('openai')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao salvar chave OpenAI'
+      setOpenaiKey((k) => ({ ...k, status: 'invalid' }))
+      toast.error(message)
+    }
+  }
+
+  const handleRemoveKey = async (targetProvider: 'google' | 'openai') => {
+    try {
+      await settingsService.removeAIKey(targetProvider)
+      toast.success(`Chave ${targetProvider === 'google' ? 'Google' : 'OpenAI'} removida`)
+      setModels([])
+      await loadConfig()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao remover chave'
+      toast.error(message)
+    }
+  }
+
+  // =============================================================================
+  // HANDLERS — provider / model / config
+  // =============================================================================
+
+  const handleProviderSelect = (nextProvider: AiProviderType) => {
+    setProvider(nextProvider)
+    setModel(DEFAULT_MODEL_ID)
+    setModels([])
+  }
+
+  const handleModelChange = (nextModel: string) => {
+    setModel(nextModel)
   }
 
   const handleSave = async () => {
     setIsSaving(true)
     setErrorMessage(null)
     try {
-      await settingsService.saveAIConfig({
-        provider,
-        model,
-        routes,
-        prompts,
-        fallback,
-      })
-      toast.success('Configuracoes salvas')
+      await settingsService.saveAIConfig({ provider, model, routes, prompts })
+      toast.success('Configurações salvas')
       await loadConfig()
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Erro ao salvar configuracoes'
+        error instanceof Error ? error.message : 'Erro ao salvar configurações'
       setErrorMessage(message)
       toast.error(message)
     } finally {
@@ -210,20 +237,6 @@ export const useSettingsAIController = () => {
   }
 
   // OCR Handlers
-  const handleOcrProviderChange = async (newProvider: OCRProviderType) => {
-    setIsSavingOcr(true)
-    try {
-      await settingsService.saveAIConfig({ ocr_provider: newProvider })
-      setOcrConfig((current) => ({ ...current, provider: newProvider }))
-      toast.success('Provider de OCR atualizado')
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro ao salvar provider OCR'
-      toast.error(message)
-    } finally {
-      setIsSavingOcr(false)
-    }
-  }
-
   const handleOcrGeminiModelChange = async (newModel: string) => {
     setIsSavingOcr(true)
     try {
@@ -238,92 +251,37 @@ export const useSettingsAIController = () => {
     }
   }
 
-  const handleSaveMistralKey = async () => {
-    const apiKey = mistralKeyDraft.trim()
-    if (!apiKey) {
-      toast.error('Informe a chave de API do Mistral')
-      return
-    }
-    setIsSavingOcr(true)
-    try {
-      await settingsService.saveAIConfig({ mistral_api_key: apiKey })
-      setMistralKeyDraft('')
-      setShowMistralKeyInput(false)
-      toast.success('Chave Mistral salva')
-      await loadConfig()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro ao salvar chave Mistral'
-      toast.error(message)
-    } finally {
-      setIsSavingOcr(false)
-    }
-  }
-
-  const handleRemoveMistralKey = async () => {
-    setIsSavingOcr(true)
-    try {
-      await settingsService.removeAIKey('mistral')
-      toast.success('Chave Mistral removida')
-      await loadConfig()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro ao remover chave Mistral'
-      toast.error(message)
-    } finally {
-      setIsSavingOcr(false)
-    }
-  }
-
-  const handleModelChange = (nextModel: string) => {
-    setModel(nextModel)
-    setFallback((current) => ({
-      ...current,
-      models: {
-        ...current.models,
-        [provider]: nextModel,
-      },
-    }))
-  }
-
-  const handleFallbackToggle = (next: boolean) => {
-    setFallback((current) => ({ ...current, enabled: next }))
-  }
-
   const handlePromptChange = (key: keyof AiPromptsConfig, value: string) => {
-    setPrompts((current) => ({
-      ...current,
-      [key]: value,
-    }))
+    setPrompts((current) => ({ ...current, [key]: value }))
   }
 
   const handleRouteToggle = (key: keyof AiRoutesConfig, next: boolean) => {
-    setRoutes((current) => ({
-      ...current,
-      [key]: next,
-    }))
-  }
-
-  const handleMistralKeyInputToggle = () => {
-    setShowMistralKeyInput((prev) => !prev)
+    setRoutes((current) => ({ ...current, [key]: next }))
   }
 
   const handleStrategiesToggle = () => {
     setIsStrategiesOpen((prev) => !prev)
   }
 
+  // =============================================================================
+  // RETURN
+  // =============================================================================
+
   return {
     // Dev mode
     isDevMode,
 
-    // Provider state
+    // Provider + model
     provider,
     model,
-    primaryProviderLabel,
-    primaryModelLabel,
-    primaryModelOptions,
+    models,
+    modelsLoading,
 
-    // Fallback
-    fallback,
-    fallbackSummary,
+    // API keys
+    googleKey,
+    openaiKey,
+    googleKeyDraft,
+    openaiKeyDraft,
 
     // Routes & Prompts
     routes,
@@ -336,31 +294,27 @@ export const useSettingsAIController = () => {
 
     // OCR
     ocrConfig,
-    mistralKeyDraft,
     isSavingOcr,
-    showMistralKeyInput,
 
-    // Collapsible sections
+    // Collapsible
     isStrategiesOpen,
 
     // Handlers
     handleSave,
     handleProviderSelect,
-    handleFallbackMove,
-    handleFallbackToggle,
     handleModelChange,
-    handleOcrProviderChange,
+    handleSaveGoogleKey,
+    handleSaveOpenAIKey,
+    handleRemoveKey,
+    fetchModels,
     handleOcrGeminiModelChange,
-    handleSaveMistralKey,
-    handleRemoveMistralKey,
-    handleMistralKeyInputToggle,
     handlePromptChange,
     handleRouteToggle,
     handleStrategiesToggle,
-    setMistralKeyDraft,
-
-    // Utility functions (exposed for view)
-    getProviderConfig,
-    getModelLabel,
+    setGoogleKeyDraft,
+    setOpenaiKeyDraft,
   }
 }
+
+// Tipo AIProvider é mantido para retrocompatibilidade com imports existentes
+export type { AIProvider }

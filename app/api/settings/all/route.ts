@@ -3,9 +3,8 @@ import { settingsDb } from '@/lib/supabase-db'
 import { supabase } from '@/lib/supabase'
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { fetchWithTimeout } from '@/lib/server-http'
-import { DEFAULT_AI_FALLBACK, DEFAULT_AI_PROMPTS, DEFAULT_AI_ROUTES } from '@/lib/ai/ai-center-defaults'
+import { DEFAULT_AI_PROMPTS, DEFAULT_AI_ROUTES } from '@/lib/ai/ai-center-defaults'
 import {
-  prepareAiFallbackUpdate,
   prepareAiPromptsUpdate,
   prepareAiRoutesUpdate,
 } from '@/lib/ai/ai-center-config'
@@ -67,7 +66,6 @@ interface AISettingsData {
   source: string
   tokenPreview: string | null
   routes: any
-  fallback: any
   prompts: any
 }
 
@@ -189,48 +187,42 @@ async function fetchAISettings(): Promise<AISettingsData> {
     ?.from('settings')
     .select('key, value')
     .in('key', [
-      'gemini_api_key', 'openai_api_key', 'anthropic_api_key',
-      'ai_provider', 'ai_model', 'ai_routes', 'ai_fallback', 'ai_prompts',
+      'ai_direct', 'google_api_key', 'openai_api_key',
+      'ai_routes', 'ai_prompts',
     ]) || { data: null }
 
   const settingsMap = new Map(data?.map(s => [s.key, s.value]) || [])
 
-  const savedProvider = (settingsMap.get('ai_provider') as string) || 'google'
-  const savedModel = (settingsMap.get('ai_model') as string) || ''
+  const directRaw = parseJsonSetting(settingsMap.get('ai_direct') as string | null, { provider: 'google', model: '' })
+  const savedProvider = (directRaw.provider as string) || 'google'
+  const savedModel = (directRaw.model as string) || ''
 
-  const providerKeys = {
-    google: settingsMap.get('gemini_api_key') || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY || '',
-    openai: settingsMap.get('openai_api_key') || process.env.OPENAI_API_KEY || '',
-    anthropic: settingsMap.get('anthropic_api_key') || process.env.ANTHROPIC_API_KEY || '',
-  }
-
-  const providerSources = {
-    google: settingsMap.get('gemini_api_key') ? 'database' : (providerKeys.google ? 'env' : 'none'),
-    openai: settingsMap.get('openai_api_key') ? 'database' : (providerKeys.openai ? 'env' : 'none'),
-    anthropic: settingsMap.get('anthropic_api_key') ? 'database' : (providerKeys.anthropic ? 'env' : 'none'),
-  }
+  const googleKey = (settingsMap.get('google_api_key') as string) || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY || ''
+  const openaiKey = (settingsMap.get('openai_api_key') as string) || process.env.OPENAI_API_KEY || ''
 
   const getPreview = (key: string) => key ? `${key.substring(0, 4)}...${key.substring(key.length - 4)}` : null
-
-  const providerPreviews = {
-    google: getPreview(providerKeys.google),
-    openai: getPreview(providerKeys.openai),
-    anthropic: getPreview(providerKeys.anthropic),
-  }
 
   return {
     provider: savedProvider,
     model: savedModel,
     providers: {
-      google: { isConfigured: !!providerKeys.google, source: providerSources.google, tokenPreview: providerPreviews.google },
-      openai: { isConfigured: !!providerKeys.openai, source: providerSources.openai, tokenPreview: providerPreviews.openai },
-      anthropic: { isConfigured: !!providerKeys.anthropic, source: providerSources.anthropic, tokenPreview: providerPreviews.anthropic },
+      google: {
+        isConfigured: !!googleKey,
+        source: settingsMap.get('google_api_key') ? 'database' : (googleKey ? 'env' : 'none'),
+        tokenPreview: getPreview(googleKey),
+      },
+      openai: {
+        isConfigured: !!openaiKey,
+        source: settingsMap.get('openai_api_key') ? 'database' : (openaiKey ? 'env' : 'none'),
+        tokenPreview: getPreview(openaiKey),
+      },
     },
-    isConfigured: !!providerKeys[savedProvider as keyof typeof providerKeys],
-    source: providerSources[savedProvider as keyof typeof providerSources],
-    tokenPreview: providerPreviews[savedProvider as keyof typeof providerPreviews],
+    isConfigured: savedProvider === 'google' ? !!googleKey : !!openaiKey,
+    source: savedProvider === 'google'
+      ? (settingsMap.get('google_api_key') ? 'database' : (googleKey ? 'env' : 'none'))
+      : (settingsMap.get('openai_api_key') ? 'database' : (openaiKey ? 'env' : 'none')),
+    tokenPreview: savedProvider === 'google' ? getPreview(googleKey) : getPreview(openaiKey),
     routes: prepareAiRoutesUpdate(parseJsonSetting(settingsMap.get('ai_routes') as string | null, DEFAULT_AI_ROUTES)),
-    fallback: prepareAiFallbackUpdate(parseJsonSetting(settingsMap.get('ai_fallback') as string | null, DEFAULT_AI_FALLBACK)),
     prompts: prepareAiPromptsUpdate(parseJsonSetting(settingsMap.get('ai_prompts') as string | null, DEFAULT_AI_PROMPTS)),
   }
 }
@@ -378,7 +370,7 @@ export async function GET() {
       fetchCredentials().catch((e) => ({ source: 'none' as const, isConnected: false, warning: e.message })),
       fetchAISettings().catch(() => ({
         provider: 'google', model: '', providers: {}, isConfigured: false, source: 'none',
-        tokenPreview: null, routes: DEFAULT_AI_ROUTES, fallback: DEFAULT_AI_FALLBACK, prompts: DEFAULT_AI_PROMPTS,
+        tokenPreview: null, routes: DEFAULT_AI_ROUTES, prompts: DEFAULT_AI_PROMPTS,
       })),
       fetchMetaApp().catch(() => ({ source: 'none' as const, appId: null, hasAppSecret: false, isConfigured: false })),
       fetchTestContact().catch(() => null),

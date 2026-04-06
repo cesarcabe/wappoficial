@@ -4,10 +4,13 @@
  * Used by the AI Co-pilot feature in the inbox
  */
 
-import { streamText, gateway, tool } from 'ai'
+import { streamText, tool } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase-server'
-import { DEFAULT_MODEL_ID, normalizeToGatewayModelId } from '@/lib/ai/model'
+import { DEFAULT_MODEL_ID } from '@/lib/ai/model'
+import { getAiDirectConfig } from '@/lib/ai/ai-center-config'
 import { inboxDb } from '@/lib/inbox/inbox-db'
 import type { AIAgent, InboxConversation } from '@/types'
 
@@ -165,11 +168,19 @@ export async function POST(req: Request) {
         content: m.content,
       }))
 
-    // Create AI model via Gateway
-    const modelId = normalizeToGatewayModelId(agent.model || DEFAULT_MODEL_ID)
-    const model = gateway(modelId)
+    // Criar modelo direto via provider
+    const config = await getAiDirectConfig()
+    const targetModelId = agent.model || config.model || DEFAULT_MODEL_ID
+    let model
+    if (config.provider === 'google') {
+        if (!config.googleApiKey) throw new Error('Chave Google não configurada. Acesse Configurações → IA.')
+        model = createGoogleGenerativeAI({ apiKey: config.googleApiKey })(targetModelId)
+    } else {
+        if (!config.openaiApiKey) throw new Error('Chave OpenAI não configurada. Acesse Configurações → IA.')
+        model = createOpenAI({ apiKey: config.openaiApiKey })(targetModelId)
+    }
 
-    console.log(`[inbox/suggest] Using model: ${modelId} (via Gateway)`)
+    console.log(`[inbox/suggest] Using model: ${targetModelId} (provider: ${config.provider})`)
 
     // Capture structured response
     let suggestion: SuggestResponse | undefined

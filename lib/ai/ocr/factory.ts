@@ -1,96 +1,51 @@
 /**
  * OCR Provider Factory
  *
- * Gerencia a criação e seleção de providers de OCR.
- * Busca configurações do Supabase (settings) e faz fallback para env vars.
+ * Cria e seleciona o provider de OCR.
+ * Usa a chave Google (`google_api_key`) do Supabase — mesma chave dos agentes de IA.
  *
  * Configurações no banco:
- * - `ocr_provider`: 'gemini' | 'mistral' (default: 'gemini')
+ * - `google_api_key`: API key do Google Gemini (obrigatória para OCR)
  * - `ocr_gemini_model`: modelo Gemini para OCR (default: 'gemini-2.5-flash')
- * - `mistral_api_key`: API key do Mistral (fallback: env MISTRAL_API_KEY)
- *
- * Gemini usa autenticação via AI Gateway (OIDC) — sem necessidade de API key.
  */
 
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { GeminiOCRProvider, DEFAULT_OCR_MODEL } from './providers/gemini'
-import { MistralOCRProvider } from './providers/mistral'
 import type { OCRProvider } from './types'
 
 /** Providers de OCR disponíveis */
-export type OCRProviderName = 'gemini' | 'mistral'
-
-/** Provider padrão quando nenhum é especificado */
-const DEFAULT_PROVIDER: OCRProviderName = 'gemini'
+export type OCRProviderName = 'gemini'
 
 /**
- * Obtém um provider de OCR configurado
+ * Obtém o provider de OCR Gemini configurado com a chave do banco.
  *
- * @param preferredProvider - Provider preferido (sobrescreve config do banco)
- * @returns Provider configurado ou null se nenhum estiver disponível
- *
- * @example
- * ```ts
- * // Usar provider configurado no banco/default
- * const provider = await getOCRProvider()
- *
- * // Forçar Mistral específico
- * const mistral = await getOCRProvider('mistral')
- * ```
+ * @returns Provider configurado ou null se `google_api_key` não estiver disponível
  */
-export async function getOCRProvider(
-  preferredProvider?: OCRProviderName
-): Promise<OCRProvider | null> {
+export async function getOCRProvider(): Promise<OCRProvider | null> {
   const supabase = getSupabaseAdmin()
-
-  // Se não tiver Supabase, usar apenas env vars
-  let settingsMap = new Map<string, string>()
+  let googleApiKey: string | undefined
+  let geminiOcrModel = DEFAULT_OCR_MODEL
 
   if (supabase) {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['mistral_api_key', 'ocr_provider', 'ocr_gemini_model'])
+      .in('key', ['google_api_key', 'ocr_gemini_model'])
 
-    settingsMap = new Map(settings?.map((s) => [s.key, s.value]) || [])
+    const settingsMap = new Map(settings?.map((s) => [s.key, s.value]) || [])
+    googleApiKey = settingsMap.get('google_api_key') || undefined
+    geminiOcrModel = settingsMap.get('ocr_gemini_model') || DEFAULT_OCR_MODEL
   }
 
-  // Determinar qual provider usar (parâmetro > banco > default)
-  const providerName =
-    preferredProvider || (settingsMap.get('ocr_provider') as OCRProviderName) || DEFAULT_PROVIDER
+  // Fallback para env var
+  googleApiKey = googleApiKey || process.env.GOOGLE_API_KEY || undefined
 
-  const mistralKey = settingsMap.get('mistral_api_key') || process.env.MISTRAL_API_KEY
-
-  // Modelo Gemini para OCR (banco > default)
-  const geminiOcrModel = settingsMap.get('ocr_gemini_model') || DEFAULT_OCR_MODEL
-
-  // Factories: Gemini usa AI Gateway (sempre disponível); Mistral requer chave
-  const providers: Record<OCRProviderName, () => OCRProvider | null> = {
-    gemini: () => new GeminiOCRProvider(geminiOcrModel),
-    mistral: () => (mistralKey ? new MistralOCRProvider(mistralKey) : null),
+  if (!googleApiKey) {
+    console.warn('[ocr] google_api_key não configurada — OCR indisponível')
+    return null
   }
 
-  // Tentar provider preferido primeiro
-  let provider = providers[providerName]?.()
-
-  // Fallback: tentar outros providers se o preferido não estiver configurado
-  if (!provider) {
-    for (const [name, factory] of Object.entries(providers)) {
-      if (name !== providerName) {
-        provider = factory()
-        if (provider) {
-          console.log(`[ocr] Fallback to ${name} (${providerName} not configured)`)
-          break
-        }
-      }
-    }
-  }
-
-  if (!provider) {
-    console.warn('[ocr] No OCR provider available - check API keys')
-  }
-
-  return provider
+  return new GeminiOCRProvider(geminiOcrModel, googleApiKey)
 }
 
 /**
@@ -98,22 +53,19 @@ export async function getOCRProvider(
  */
 export async function getAvailableOCRProviders(): Promise<OCRProviderName[]> {
   const supabase = getSupabaseAdmin()
-
-  // Gemini usa AI Gateway (OIDC) — sempre disponível
-  const available: OCRProviderName[] = ['gemini']
+  let googleApiKey: string | undefined
 
   if (supabase) {
     const { data: settings } = await supabase
       .from('settings')
       .select('key, value')
-      .in('key', ['mistral_api_key'])
+      .in('key', ['google_api_key'])
 
     const settingsMap = new Map(settings?.map((s) => [s.key, s.value]) || [])
-    const mistralKey = settingsMap.get('mistral_api_key') || process.env.MISTRAL_API_KEY
-    if (mistralKey) available.push('mistral')
-  } else {
-    if (process.env.MISTRAL_API_KEY) available.push('mistral')
+    googleApiKey = settingsMap.get('google_api_key') || undefined
   }
 
-  return available
+  googleApiKey = googleApiKey || process.env.GOOGLE_API_KEY || undefined
+
+  return googleApiKey ? ['gemini'] : []
 }
