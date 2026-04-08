@@ -18,34 +18,46 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validar token fazendo uma requisição de listagem de schedules
-    // Endpoint US-East-1 (região obrigatória — outras regiões não são compatíveis)
-    const qstashRes = await fetch('https://qstash-us-east-1.upstash.io/v2/schedules', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    // Valida o token tentando múltiplas regiões do QStash (US e EU)
+    const QSTASH_REGIONS = [
+      'https://qstash.upstash.io',
+      'https://qstash-us-east-1.upstash.io',
+      'https://qstash-eu-west-1.upstash.io',
+      'https://qstash-eu-central-1.upstash.io',
+    ];
 
-    if (!qstashRes.ok) {
+    let lastStatus = 0;
+    let lastError = '';
+
+    for (const baseUrl of QSTASH_REGIONS) {
+      const qstashRes = await fetch(`${baseUrl}/v2/schedules`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (qstashRes.ok) {
+        // Token válido nesta região
+        return NextResponse.json({ valid: true, message: 'Token QStash válido' });
+      }
+
       if (qstashRes.status === 401 || qstashRes.status === 403) {
+        // Credencial definitivamente inválida — não adianta tentar outras regiões
         return NextResponse.json(
-          { error: 'Token QStash inválido. Verifique se criou o QStash na região US-East-1 no Upstash.' },
+          { error: 'Token QStash inválido. Verifique o QSTASH_TOKEN na aba Details do Upstash.' },
           { status: 401 }
         );
       }
 
-      const errorText = await qstashRes.text().catch(() => '');
-      return NextResponse.json(
-        { error: `Erro ao validar token: ${errorText || qstashRes.statusText}` },
-        { status: qstashRes.status }
-      );
+      // 404 com "not found in this region" → tenta próxima região
+      const body = await qstashRes.text().catch(() => '');
+      lastStatus = qstashRes.status;
+      lastError = body || qstashRes.statusText;
     }
 
-    return NextResponse.json({
-      valid: true,
-      message: 'Token QStash válido',
-    });
+    return NextResponse.json(
+      { error: `Erro ao validar token: ${lastError}` },
+      { status: lastStatus || 502 }
+    );
 
   } catch (error) {
     console.error('[installer/qstash/validate] Erro:', error);
