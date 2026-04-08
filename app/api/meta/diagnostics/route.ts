@@ -438,7 +438,7 @@ async function tryGetWithFields(objectId: string, accessToken: string, fieldsLis
 async function getMetaSubscriptionStatus(params: { wabaId: string; accessToken: string }) {
 	const { wabaId, accessToken } = params
 	const res = await graphGet(`/${wabaId}/subscribed_apps`, accessToken, {
-		fields: 'id,name,subscribed_fields',
+		fields: 'id,name,subscribed_fields,override_callback_uri',
 	})
 
 	if (!res.ok) {
@@ -452,12 +452,14 @@ async function getMetaSubscriptionStatus(params: { wabaId: string; accessToken: 
 
 	const apps = (res.json?.data || []) as MetaSubscribedApp[]
 	const subscribedFields = normalizeSubscribedFields(apps)
+	const overrideCallbackUri = (apps[0] as any)?.override_callback_uri || null
 	return {
 		ok: true as const,
 		status: 200,
 		apps,
 		subscribedFields,
 		messagesSubscribed: subscribedFields.includes('messages'),
+		overrideCallbackUri,
 	}
 }
 
@@ -1294,18 +1296,36 @@ export async function GET() {
 	meta.subscription = sub
 
 	if (sub.ok) {
+		// override_callback_uri apontando para a URL do SmartZap também é configuração válida —
+		// eventos são roteados via override mesmo sem subscribed_fields explícito no subscribed_apps.
+		const overrideIsSmartZap =
+			sub.overrideCallbackUri != null && sub.overrideCallbackUri === webhookUrl
+		const webhookActive = sub.messagesSubscribed || overrideIsSmartZap
+
+		let statusLabel: string
+		let messageLabel: string
+		if (sub.messagesSubscribed) {
+			statusLabel = 'pass'
+			messageLabel = 'Ativo via subscribed_apps'
+		} else if (overrideIsSmartZap) {
+			statusLabel = 'pass'
+			messageLabel = `Ativo via override_callback_uri → ${sub.overrideCallbackUri}`
+		} else {
+			statusLabel = 'fail'
+			messageLabel = 'Inativo — override_callback_uri não aponta para o SmartZap e messages não inscrito'
+		}
+
 		checks.push({
 			id: 'meta_subscription_messages',
 			title: 'Webhook (messages) inscrito no WABA',
-			status: sub.messagesSubscribed ? 'pass' : 'fail',
-			message: sub.messagesSubscribed
-				? 'Ativo via API (subscribed_apps)'
-				: 'Inativo via API (subscribed_apps) — não receberá status de mensagens',
+			status: statusLabel as 'pass' | 'fail',
+			message: messageLabel,
 			details: {
 				subscribedFields: sub.subscribedFields,
+				overrideCallbackUri: sub.overrideCallbackUri,
 				apps: sub.apps,
 			},
-			actions: sub.messagesSubscribed
+			actions: webhookActive
 				? [
 						{
 							id: 'unsubscribe_messages',
