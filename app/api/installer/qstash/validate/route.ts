@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
       if (qstashRes.ok) {
         // Token válido nesta região
-        return NextResponse.json({ valid: true, message: 'Token QStash válido' });
+        return NextResponse.json({ valid: true, message: 'Token QStash válido', qstashUrl: baseUrl });
       }
 
       if (qstashRes.status === 401 || qstashRes.status === 403) {

@@ -14,6 +14,7 @@ import type { FormProps } from './types';
  */
 export function QStashForm({ data, onComplete, onBack, showBack }: FormProps) {
   const [token, setToken] = useState(data.qstashToken);
+  const [detectedUrl, setDetectedUrl] = useState(data.qstashUrl ?? '');
   const [validating, setValidating] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +58,11 @@ export function QStashForm({ data, onComplete, onBack, showBack }: FormProps) {
         await new Promise(r => setTimeout(r, MIN_VALIDATION_TIME - elapsed));
       }
 
+      // Salva a URL da região detectada para uso no provisioning
+      if (result.qstashUrl) {
+        setDetectedUrl(result.qstashUrl);
+      }
+
       setSuccess(true);
     } catch (err) {
       const elapsed = Date.now() - startTime;
@@ -71,7 +77,7 @@ export function QStashForm({ data, onComplete, onBack, showBack }: FormProps) {
   };
 
   const handleSuccessComplete = () => {
-    onComplete({ qstashToken: token.trim() });
+    onComplete({ qstashToken: token.trim(), qstashUrl: detectedUrl });
   };
 
   const handleAutoSubmit = () => {
