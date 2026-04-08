@@ -55,6 +55,7 @@ const ProvisionSchema = z.object({
   }),
   qstash: z.object({
     token: z.string().min(30),
+    url: z.string().url().optional(),
   }),
   redis: z.object({
     restUrl: z.string().url(),
@@ -177,31 +178,40 @@ async function validateVercelToken(token: string): Promise<{ projectId: string; 
   };
 }
 
-async function validateQStashToken(token: string): Promise<void> {
-  // Detecta região via JWT (mesmo padrão de /api/installer/qstash/validate)
-  let qstashBaseUrl = 'https://qstash.upstash.io';
-  try {
-    const payloadB64 = token.split('.')[1];
-    if (payloadB64) {
-      const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString());
-      if (payload.iss && typeof payload.iss === 'string') {
-        qstashBaseUrl = payload.iss.replace(/\/$/, '');
-      }
-    }
-  } catch {
-    // JWT indecodificável: usa fallback genérico
-  }
-
-  const res = await fetchWithTimeout(`${qstashBaseUrl}/v2/schedules`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
+async function validateQStashToken(token: string, knownUrl?: string): Promise<string> {
+  // Se o wizard já detectou a URL da região, usa diretamente
+  if (knownUrl) {
+    const res = await fetchWithTimeout(`${knownUrl}/v2/schedules`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) return knownUrl;
     if (res.status === 401 || res.status === 403) {
       throw new Error('Token QStash inválido. Copie o QSTASH_TOKEN do console Upstash → QStash → Details.');
     }
-    throw new Error('Erro ao validar token QStash');
   }
+
+  // Tenta múltiplas regiões — o token pode ser de qualquer região
+  const REGIONS = [
+    'https://qstash.upstash.io',
+    'https://qstash-us-east-1.upstash.io',
+    'https://qstash-eu-west-1.upstash.io',
+    'https://qstash-eu-central-1.upstash.io',
+  ];
+
+  for (const baseUrl of REGIONS) {
+    const res = await fetchWithTimeout(`${baseUrl}/v2/schedules`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (res.ok) return baseUrl;
+
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Token QStash inválido. Copie o QSTASH_TOKEN do console Upstash → QStash → Details.');
+    }
+    // 404 = token válido mas região errada, tenta próxima
+  }
+
+  throw new Error('Não foi possível validar o token QStash em nenhuma região.');
 }
 
 async function validateRedisCredentials(url: string, token: string): Promise<void> {
@@ -578,8 +588,8 @@ export async function POST(req: Request) {
         subtitle: step6.subtitle,
       });
 
-      await validateQStashToken(qstash.token);
-      console.log('[provision] ✅ Step 6/12: Validate QStash - COMPLETO');
+      const detectedQStashUrl = await validateQStashToken(qstash.token, qstash.url);
+      console.log('[provision] ✅ Step 6/12: Validate QStash - COMPLETO', { detectedQStashUrl });
       stepIndex++;
 
       // Step 7: Validate Redis
@@ -614,6 +624,7 @@ export async function POST(req: Request) {
         { key: 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', value: anonKey, targets: [...envTargets] },
         { key: 'SUPABASE_SECRET_KEY', value: serviceRoleKey, targets: [...envTargets] },
         { key: 'QSTASH_TOKEN', value: qstash.token, targets: [...envTargets] },
+        { key: 'QSTASH_URL', value: detectedQStashUrl, targets: [...envTargets] },
         { key: 'UPSTASH_REDIS_REST_URL', value: redis.restUrl, targets: [...envTargets] },
         { key: 'UPSTASH_REDIS_REST_TOKEN', value: redis.restToken, targets: [...envTargets] },
         { key: 'MASTER_PASSWORD', value: passwordHash, targets: [...envTargets] },

@@ -66,6 +66,7 @@ export interface InstallData {
   vercelToken: string;
   supabasePat: string;
   qstashToken: string;
+  qstashUrl: string;
   redisRestUrl: string;
   redisRestToken: string;
 }
@@ -77,6 +78,7 @@ export const EMPTY_INSTALL_DATA: InstallData = {
   vercelToken: '',
   supabasePat: '',
   qstashToken: '',
+  qstashUrl: '',
   redisRestUrl: '',
   redisRestToken: '',
 };
