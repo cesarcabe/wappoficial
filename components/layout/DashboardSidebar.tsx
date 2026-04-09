@@ -121,9 +121,9 @@ const CompactSidebar = memo(function CompactSidebar({
         <div
           className="flex h-9 w-9 items-center justify-center"
           role="img"
-          aria-label="Logo AgileAds"
+          aria-label="Logo AgiLeads"
         >
-          <Image src="/brand/icone amarelo.png" alt="AgileAds" width={32} height={32} className="object-contain" />
+          <Image src="/brand/icone amarelo.png" alt="AgiLeads" width={32} height={32} className="object-contain" />
         </div>
         <nav className="flex flex-1 flex-col items-center gap-1.5 pt-1" aria-label="Menu principal">
           {navItems.map((item) => {
@@ -240,12 +240,12 @@ const ExpandedSidebar = memo(function ExpandedSidebar({
           <div
             className="w-10 h-10 flex items-center justify-center mr-2"
             role="img"
-            aria-label="Logo AgileAds"
+            aria-label="Logo AgiLeads"
           >
-            <Image src="/brand/icone amarelo.png" alt="AgileAds" width={36} height={36} className="object-contain" />
+            <Image src="/brand/icone amarelo.png" alt="AgiLeads" width={36} height={36} className="object-contain" />
           </div>
           <div>
-            <span className="text-2xl font-bold text-[var(--ds-text-primary)] tracking-tight block ml-1">AgileAds</span>
+            <span className="text-2xl font-bold text-[var(--ds-text-primary)] tracking-tight block ml-1">AgiLeads</span>
           </div>
           <button
             type="button"
@@ -351,11 +351,11 @@ const ExpandedSidebar = memo(function ExpandedSidebar({
               aria-hidden="true"
             >
               <span className="text-lg font-bold text-primary-600 dark:text-primary-400">
-                {(companyName || 'AgileAds').charAt(0).toUpperCase()}
+                {(companyName || 'AgiLeads').charAt(0).toUpperCase()}
               </span>
             </div>
             <div className="flex-1 min-w-0 text-left">
-              <p className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{companyName || 'AgileAds'}</p>
+              <p className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{companyName || 'AgiLeads'}</p>
               <p className="text-xs text-[var(--ds-text-muted)] truncate">Administrador</p>
             </div>
             {isLoggingOut ? (
