@@ -286,6 +286,7 @@ export interface ProvisionPayload {
   };
   qstash: {
     token: string;
+    url?: string;
   };
   redis: {
     restUrl: string;
