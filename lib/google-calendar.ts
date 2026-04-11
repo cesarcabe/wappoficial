@@ -453,23 +453,29 @@ export async function createEvent(params: {
   })
 }
 
-export async function stopWatchChannel(channel: { id: string; resourceId: string }): Promise<void> {
+export async function stopWatchChannel(
+  channel: { id: string; resourceId: string },
+  freshTokens?: GoogleCalendarTokens,
+): Promise<void> {
   try {
     await googleCalendarFetch('/channels/stop', {
       method: 'POST',
       body: JSON.stringify({ id: channel.id, resourceId: channel.resourceId }),
-    })
+    }, freshTokens)
   } catch (error) {
     console.warn('[google-calendar] Falha ao parar channel:', error)
   }
 }
 
-export async function createWatchChannel(params: {
-  calendarId: string
-  channelId: string
-  channelToken: string
-  address: string
-}): Promise<GoogleCalendarChannel> {
+export async function createWatchChannel(
+  params: {
+    calendarId: string
+    channelId: string
+    channelToken: string
+    address: string
+  },
+  freshTokens?: GoogleCalendarTokens,
+): Promise<GoogleCalendarChannel> {
   const data = await googleCalendarFetch(`/calendars/${encodeURIComponent(params.calendarId)}/events/watch`, {
     method: 'POST',
     body: JSON.stringify({
@@ -478,7 +484,7 @@ export async function createWatchChannel(params: {
       address: params.address,
       token: params.channelToken,
     }),
-  })
+  }, freshTokens)
 
   return {
     id: String(data.id || params.channelId),
@@ -511,7 +517,10 @@ export async function buildDefaultCalendarConfig(
   }
 }
 
-export async function ensureCalendarChannel(calendarId: string): Promise<GoogleCalendarChannel> {
+export async function ensureCalendarChannel(
+  calendarId: string,
+  freshTokens?: GoogleCalendarTokens,
+): Promise<GoogleCalendarChannel> {
   const existing = await getCalendarChannel()
   const now = Date.now()
   if (existing && existing.calendarId === calendarId) {
@@ -523,7 +532,7 @@ export async function ensureCalendarChannel(calendarId: string): Promise<GoogleC
   }
 
   if (existing?.id && existing.resourceId) {
-    await stopWatchChannel({ id: existing.id, resourceId: existing.resourceId })
+    await stopWatchChannel({ id: existing.id, resourceId: existing.resourceId }, freshTokens)
   }
 
   const channelId = randomToken('gc_channel')
@@ -534,7 +543,7 @@ export async function ensureCalendarChannel(calendarId: string): Promise<GoogleC
     channelId,
     channelToken,
     address,
-  })
+  }, freshTokens)
   await saveCalendarChannel(channel)
   return channel
 }

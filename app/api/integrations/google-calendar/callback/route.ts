@@ -27,16 +27,23 @@ export async function GET(request: NextRequest) {
     }
 
     const tokens = await exchangeCodeForTokens(code)
+    console.log('[google-calendar] callback: tokens obtidos, salvando...')
     await saveTokens(tokens)
+    console.log('[google-calendar] callback: tokens salvos no Supabase + cache Redis')
 
     const accountEmail = await fetchGoogleAccountEmail(tokens.accessToken)
-    // Passa os tokens em memória para evitar que buildDefaultCalendarConfig dependa de
-    // getStoredTokens() → Redis logo após saveTokens(). Se o cache Redis ainda contiver
-    // um valor obsoleto ("" ou token antigo), o fluxo OAuth não quebra.
+    console.log('[google-calendar] callback: email obtido:', accountEmail)
+
+    // Passa os tokens em memória por toda a cadeia (buildDefaultCalendarConfig →
+    // listCalendars → ensureCalendarChannel → createWatchChannel). Isso desacopla
+    // completamente o fluxo OAuth de qualquer leitura de Redis/Supabase logo após
+    // saveTokens(), eliminando race conditions de cache.
     const config = await buildDefaultCalendarConfig(accountEmail, tokens)
+    console.log('[google-calendar] callback: config built, calendarId:', config.calendarId)
     await saveCalendarConfig(config)
 
-    await ensureCalendarChannel(config.calendarId)
+    await ensureCalendarChannel(config.calendarId, tokens)
+    console.log('[google-calendar] callback: channel garantido')
 
     // Forçar path local — nunca permitir URLs absolutas (previne open redirect)
     const safePath = returnTo.startsWith('/') ? returnTo : '/settings'
