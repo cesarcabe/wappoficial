@@ -30,7 +30,10 @@ export async function GET(request: NextRequest) {
     await saveTokens(tokens)
 
     const accountEmail = await fetchGoogleAccountEmail(tokens.accessToken)
-    const config = await buildDefaultCalendarConfig(accountEmail)
+    // Passa os tokens em memória para evitar que buildDefaultCalendarConfig dependa de
+    // getStoredTokens() → Redis logo após saveTokens(). Se o cache Redis ainda contiver
+    // um valor obsoleto ("" ou token antigo), o fluxo OAuth não quebra.
+    const config = await buildDefaultCalendarConfig(accountEmail, tokens)
     await saveCalendarConfig(config)
 
     await ensureCalendarChannel(config.calendarId)

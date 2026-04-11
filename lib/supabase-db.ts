@@ -1781,7 +1781,9 @@ export const settingsDb = {
         if (redis) {
             try {
                 const cached = await redis.get<string>(cacheKey)
-                if (cached !== null) {
+                // Trata "" (string vazia) como miss: pode ser valor obsoleto de um
+                // clearTokens() anterior ou entrada corrompida. Fallback para Supabase.
+                if (cached !== null && cached !== '') {
                     return cached
                 }
             } catch (e) {
@@ -1799,7 +1801,7 @@ export const settingsDb = {
 
         if (error || !data) return null
 
-        // 3. Armazena no cache para próximas requisições
+        // 3. Armazena no cache para próximas requisições (nunca armazena "")
         if (redis && data.value) {
             try {
                 await redis.set(cacheKey, data.value, { ex: SETTINGS_CACHE_TTL })
@@ -1825,14 +1827,20 @@ export const settingsDb = {
 
         if (error) throw error
 
-        // Invalida cache após update
+        // Sincroniza cache Redis com o novo valor:
+        // - Valor não-vazio: aquece o cache imediatamente (evita janela entre del e próximo get).
+        // - Valor vazio (ex: clearTokens): remove do cache para forçar leitura no Supabase.
         if (redis) {
             try {
                 const cacheKey = `${SETTINGS_CACHE_PREFIX}${key}`
-                await redis.del(cacheKey)
+                if (value) {
+                    await redis.set(cacheKey, value, { ex: SETTINGS_CACHE_TTL })
+                } else {
+                    await redis.del(cacheKey)
+                }
             } catch (e) {
-                // Ignore cache invalidation errors
-                console.warn('[settingsDb] Redis del error:', e)
+                // Ignore cache sync errors — Supabase é a fonte de verdade
+                console.warn('[settingsDb] Redis cache sync error:', e)
             }
         }
     },

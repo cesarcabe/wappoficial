@@ -389,8 +389,10 @@ export async function ensureAccessToken(): Promise<GoogleCalendarTokens> {
   return merged
 }
 
-async function googleCalendarFetch(path: string, init?: RequestInit): Promise<any> {
-  const token = await ensureAccessToken()
+async function googleCalendarFetch(path: string, init?: RequestInit, freshTokens?: GoogleCalendarTokens): Promise<any> {
+  // Quando freshTokens é fornecido (ex: imediatamente após saveTokens no callback OAuth),
+  // usa-os diretamente sem passar por getStoredTokens/Redis — evita race condition de cache.
+  const token = freshTokens ?? await ensureAccessToken()
   const response = await fetch(`${GOOGLE_API_BASE}${path}`, {
     ...init,
     headers: {
@@ -408,8 +410,8 @@ async function googleCalendarFetch(path: string, init?: RequestInit): Promise<an
   return json
 }
 
-export async function listCalendars(): Promise<any[]> {
-  const data = await googleCalendarFetch('/users/me/calendarList')
+export async function listCalendars(freshTokens?: GoogleCalendarTokens): Promise<any[]> {
+  const data = await googleCalendarFetch('/users/me/calendarList', undefined, freshTokens)
   return Array.isArray(data?.items) ? data.items : []
 }
 
@@ -488,8 +490,14 @@ export async function createWatchChannel(params: {
   }
 }
 
-export async function buildDefaultCalendarConfig(accountEmail?: string | null): Promise<GoogleCalendarConfig> {
-  const calendars = await listCalendars()
+export async function buildDefaultCalendarConfig(
+  accountEmail?: string | null,
+  freshTokens?: GoogleCalendarTokens,
+): Promise<GoogleCalendarConfig> {
+  // freshTokens permite chamar listCalendars sem depender do Redis/Supabase logo após
+  // saveTokens() — elimina a race condition no callback OAuth quando o cache ainda
+  // pode conter um valor obsoleto.
+  const calendars = await listCalendars(freshTokens)
   const primary = calendars.find((item: any) => item.primary) || calendars[0]
   if (!primary) {
     throw new Error('Nenhum calendario encontrado')
