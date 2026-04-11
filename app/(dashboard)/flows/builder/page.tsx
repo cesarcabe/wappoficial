@@ -44,6 +44,8 @@ export default function FlowBuilderHomePage() {
         onDelete={controller.deleteFlow}
         isDeleting={controller.isDeleting}
         onRefresh={() => controller.refetch()}
+        onSyncFromMeta={controller.syncFromMeta}
+        isSyncing={controller.isSyncing}
       />
     </Page>
   )

@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, ArrowRight, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, ArrowRight, RefreshCw, CloudDownload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -40,6 +40,8 @@ export function FlowBuilderListView(props: {
   onDelete: (id: string) => void
   isDeleting: boolean
   onRefresh: () => void
+  onSyncFromMeta: () => void
+  isSyncing: boolean
 }) {
   const router = useRouter()
   const [newName, setNewName] = useState('')
@@ -111,6 +113,17 @@ export function FlowBuilderListView(props: {
                 }
               }}
             />
+            <Button
+              type="button"
+              variant="secondary"
+              className="bg-zinc-950/40 border border-white/10 text-gray-200 hover:text-white hover:bg-white/5"
+              onClick={props.onSyncFromMeta}
+              disabled={props.isSyncing || props.isLoading}
+              title="Importa flows publicados na Meta que ainda não existem no app"
+            >
+              <CloudDownload size={16} className={props.isSyncing ? 'animate-pulse' : ''} />
+              {props.isSyncing ? 'Sincronizando…' : 'Sincronizar Meta'}
+            </Button>
             <Button
               type="button"
               variant="secondary"

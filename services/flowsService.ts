@@ -147,6 +147,21 @@ export const flowsService = {
     return api.post<unknown>('/api/flows/send', payload)
   },
 
+  async syncFromMeta(): Promise<{ imported: number; skipped: number; total: number; flows: FlowRow[] }> {
+    const res = await fetch('/api/flows/sync', { method: 'POST' })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      const msg = (data?.error && String(data.error)) || 'Falha ao sincronizar flows com a Meta'
+      throw new Error(msg)
+    }
+    return {
+      imported: typeof data?.imported === 'number' ? data.imported : 0,
+      skipped: typeof data?.skipped === 'number' ? data.skipped : 0,
+      total: typeof data?.total === 'number' ? data.total : 0,
+      flows: Array.isArray(data?.flows) ? data.flows : [],
+    }
+  },
+
   async generateForm(params: {
     prompt: string
     titleHint?: string

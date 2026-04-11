@@ -315,6 +315,53 @@ export async function metaGetEncryptionPublicKey(params: {
   }
 }
 
+export type MetaFlowsListItem = {
+  id: string
+  name: string
+  status: string
+  categories?: string[]
+  validation_errors?: unknown
+  json_version?: string
+  data_api_version?: string
+  endpoint_uri?: string
+}
+
+export async function metaListFlows(params: {
+  accessToken: string
+  wabaId: string
+}): Promise<MetaFlowsListItem[]> {
+  const fields = ['id', 'name', 'status', 'categories', 'validation_errors', 'json_version', 'data_api_version', 'endpoint_uri'].join(',')
+  const url = `${GRAPH_BASE}/${encodeURIComponent(params.wabaId)}/flows?fields=${encodeURIComponent(fields)}`
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+    },
+  })
+
+  const data = await readJsonSafe(res)
+  if (!res.ok) throw new MetaGraphApiError(buildGraphErrorMessage(data, 'Falha ao listar Flows da Meta'), res.status, data)
+
+  const items: MetaFlowsListItem[] = []
+  const rawData = Array.isArray(data?.data) ? data.data : []
+  for (const item of rawData) {
+    if (!item || typeof item !== 'object') continue
+    items.push({
+      id: typeof item.id === 'string' ? item.id : String(item.id || ''),
+      name: typeof item.name === 'string' ? item.name : '',
+      status: typeof item.status === 'string' ? item.status : '',
+      categories: Array.isArray(item.categories) ? item.categories.map(String) : undefined,
+      validation_errors: item.validation_errors,
+      json_version: typeof item.json_version === 'string' ? item.json_version : undefined,
+      data_api_version: typeof item.data_api_version === 'string' ? item.data_api_version : undefined,
+      endpoint_uri: typeof item.endpoint_uri === 'string' ? item.endpoint_uri : undefined,
+    })
+  }
+
+  return items
+}
+
 export async function metaGetFlowDetails(params: {
   accessToken: string
   flowId: string

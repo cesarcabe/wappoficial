@@ -85,6 +85,19 @@ export const useFlowsBuilderController = () => {
     onError: (e: Error) => toast.error(e.message || 'Erro ao excluir MiniApp'),
   })
 
+  const syncFromMetaMutation = useMutation({
+    mutationFn: flowsService.syncFromMeta,
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['flows'] })
+      if (result.imported > 0) {
+        toast.success(`${result.imported} MiniApp(s) importado(s) da Meta`)
+      } else {
+        toast.info('Nenhum MiniApp novo encontrado na Meta')
+      }
+    },
+    onError: (e: Error) => toast.error(e.message || 'Erro ao sincronizar com a Meta'),
+  })
+
   const flows = useMemo(() => {
     const rows = flowsQuery.data || []
     const s = search.trim().toLowerCase()
@@ -112,5 +125,8 @@ export const useFlowsBuilderController = () => {
 
     deleteFlow: (id: string) => deleteMutation.mutate(id),
     isDeleting: deleteMutation.isPending,
+
+    syncFromMeta: () => syncFromMetaMutation.mutate(),
+    isSyncing: syncFromMetaMutation.isPending,
   }
 }
