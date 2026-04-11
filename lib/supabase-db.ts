@@ -1773,12 +1773,20 @@ export const customFieldDefDb = {
 const SETTINGS_CACHE_PREFIX = 'settings:'
 const SETTINGS_CACHE_TTL = 60 // segundos
 
+const SETTINGS_NO_CACHE_KEYS = new Set([
+    'google_calendar_tokens',
+    'google_calendar_config',
+    'google_calendar_channel',
+    'googleCalendarClientId',
+    'googleCalendarClientSecret',
+])
+
 export const settingsDb = {
     get: async (key: string): Promise<string | null> => {
         const cacheKey = `${SETTINGS_CACHE_PREFIX}${key}`
 
         // 1. Tenta buscar do cache Redis
-        if (redis) {
+        if (redis && !SETTINGS_NO_CACHE_KEYS.has(key)) {
             try {
                 const cached = await redis.get<string>(cacheKey)
                 // Trata "" (string vazia) como miss: pode ser valor obsoleto de um
@@ -1802,7 +1810,7 @@ export const settingsDb = {
         if (error || !data) return null
 
         // 3. Armazena no cache para próximas requisições (nunca armazena "")
-        if (redis && data.value) {
+        if (redis && data.value && !SETTINGS_NO_CACHE_KEYS.has(key)) {
             try {
                 await redis.set(cacheKey, data.value, { ex: SETTINGS_CACHE_TTL })
             } catch (e) {
@@ -1830,7 +1838,7 @@ export const settingsDb = {
         // Sincroniza cache Redis com o novo valor:
         // - Valor não-vazio: aquece o cache imediatamente (evita janela entre del e próximo get).
         // - Valor vazio (ex: clearTokens): remove do cache para forçar leitura no Supabase.
-        if (redis) {
+        if (redis && !SETTINGS_NO_CACHE_KEYS.has(key)) {
             try {
                 const cacheKey = `${SETTINGS_CACHE_PREFIX}${key}`
                 if (value) {
