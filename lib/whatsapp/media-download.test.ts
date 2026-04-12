@@ -34,6 +34,8 @@ describe('getWhatsAppMediaInfo', () => {
     expect(result.url).toBe('https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=123')
     expect(result.mimeType).toBe('audio/ogg')
     expect(result.id).toBe('media-id-123')
+    expect(result.fileSize).toBe(40960)
+    expect(result.sha256).toBe('abc123')
   })
 
   it('throws on non-ok response', async () => {
