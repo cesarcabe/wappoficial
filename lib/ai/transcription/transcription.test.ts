@@ -257,6 +257,7 @@ describe('transcribeAudio', () => {
     vi.resetAllMocks()
     delete process.env.OPENAI_API_KEY
     delete process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    delete process.env.GEMINI_API_KEY
   })
 
   it('returns null and warns when no provider is available', async () => {
