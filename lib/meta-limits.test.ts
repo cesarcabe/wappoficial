@@ -863,13 +863,20 @@ describe('Storage functions', () => {
     })
 
     it('should return false when limits are exactly 1 hour old', () => {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-      const limitsAtBoundary = createAccountLimits({
-        lastFetched: oneHourAgo.toISOString(),
-      })
+      const frozen = new Date('2026-04-12T12:00:00.000Z')
+      vi.useFakeTimers()
+      vi.setSystemTime(frozen)
+      try {
+        const oneHourAgo = new Date(frozen.getTime() - 60 * 60 * 1000)
+        const limitsAtBoundary = createAccountLimits({
+          lastFetched: oneHourAgo.toISOString(),
+        })
 
-      // At exactly 1 hour, lastFetched equals oneHourAgo (not less than)
-      expect(areLimitsStale(limitsAtBoundary)).toBe(false)
+        // At exactly 1 hour, lastFetched equals oneHourAgo (not less than)
+        expect(areLimitsStale(limitsAtBoundary)).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('should return true when limits are 1 hour + 1 second old', () => {
