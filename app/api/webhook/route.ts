@@ -960,7 +960,8 @@ export async function POST(request: NextRequest) {
                 const transcription = await transcribeAudio(buffer, mimeType)
                 if (transcription?.text) {
                   text = `[transcrição de áudio: ${transcription.text}]`
-                  console.log(`🎤 [Webhook] Audio transcribed (${mimeType}): "${transcription.text.slice(0, 80)}..."`)
+                  const _preview = transcription.text.length > 80 ? `${transcription.text.slice(0, 80)}...` : transcription.text
+                  console.log(`🎤 [Webhook] Audio transcribed (${mimeType}): "${_preview}"`)
                 }
               }
             } catch (transcriptionError) {
