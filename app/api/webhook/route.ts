@@ -41,6 +41,8 @@ import {
   handleInboundMessage,
   handleDeliveryStatus,
 } from '@/lib/inbox/inbox-webhook'
+import { downloadWhatsAppMedia } from '@/lib/whatsapp/media-download'
+import { transcribeAudio } from '@/lib/ai/transcription'
 
 // Get WhatsApp Access Token from centralized helper
 async function getWhatsAppAccessToken(): Promise<string | null> {
@@ -943,9 +945,29 @@ export async function POST(request: NextRequest) {
         for (const message of messages) {
           const from = message.from
           const messageType = message.type
-          const text = extractInboundText(message)
+          let text = extractInboundText(message)
           const phoneNumberId = change?.value?.metadata?.phone_number_id || null
           console.log(`📩 Incoming message from ${from}: ${messageType}${text ? ` | text="${text}"` : ''}`)
+
+          // =================================================================
+          // Audio Transcription (best-effort)
+          // =================================================================
+          if (messageType === 'audio' && message.audio?.id) {
+            try {
+              const accessToken = await getWhatsAppAccessToken()
+              if (accessToken) {
+                const { buffer, mimeType } = await downloadWhatsAppMedia(message.audio.id, accessToken)
+                const transcription = await transcribeAudio(buffer, mimeType)
+                if (transcription?.text) {
+                  text = `[transcrição de áudio: ${transcription.text}]`
+                  console.log(`🎤 [Webhook] Audio transcribed (${mimeType}): "${transcription.text.slice(0, 80)}..."`)
+                }
+              }
+            } catch (transcriptionError) {
+              // Best-effort: never fail the webhook due to a transcription error
+              console.warn('[Webhook] Audio transcription failed (will store as [audio]):', transcriptionError)
+            }
+          }
 
           // =================================================================
           // T046-T047: Persist to Inbox and trigger AI if mode=bot

@@ -28,7 +28,8 @@ export class OpenAITranscriptionProvider implements TranscriptionProvider {
     const ext = mimeTypeToExtension(mimeType)
 
     // Whisper identifies the audio format from the file extension in the filename
-    const blob = new Blob([buffer], { type: mimeType })
+    // Uint8Array.from() copies bytes into a fresh ArrayBuffer (satisfies Blob's BlobPart constraint)
+    const blob = new Blob([Uint8Array.from(buffer)], { type: mimeType })
     const formData = new FormData()
     formData.append('file', blob, `audio.${ext}`)
     formData.append('model', OPENAI_WHISPER_MODEL)
