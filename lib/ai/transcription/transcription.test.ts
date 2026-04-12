@@ -158,3 +158,150 @@ describe('GeminiTranscriptionProvider', () => {
     expect(await provider.isConfigured()).toBe(true)
   })
 })
+
+// ============================================================
+// Transcription Factory
+// ============================================================
+import { getTranscriptionProvider } from './factory'
+
+// Mock Supabase admin client
+vi.mock('@/lib/supabase', () => ({
+  getSupabaseAdmin: vi.fn(),
+}))
+
+describe('getTranscriptionProvider', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    delete process.env.OPENAI_API_KEY
+    delete process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    delete process.env.GEMINI_API_KEY
+  })
+
+  it('returns OpenAITranscriptionProvider when openai_api_key is in DB', async () => {
+    const { getSupabaseAdmin } = await import('@/lib/supabase')
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          in: () =>
+            Promise.resolve({
+              data: [
+                { key: 'openai_api_key', value: 'sk-from-db' },
+                { key: 'google_api_key', value: 'gk-from-db' },
+              ],
+              error: null,
+            }),
+        }),
+      }),
+    } as any)
+
+    const provider = await getTranscriptionProvider()
+    expect(provider).toBeInstanceOf(OpenAITranscriptionProvider)
+    expect(provider?.name).toBe('openai')
+  })
+
+  it('returns GeminiTranscriptionProvider when only google_api_key is in DB', async () => {
+    const { getSupabaseAdmin } = await import('@/lib/supabase')
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          in: () =>
+            Promise.resolve({
+              data: [{ key: 'google_api_key', value: 'gk-only' }],
+              error: null,
+            }),
+        }),
+      }),
+    } as any)
+
+    const provider = await getTranscriptionProvider()
+    expect(provider?.name).toBe('gemini')
+  })
+
+  it('falls back to env var OPENAI_API_KEY when DB has no keys', async () => {
+    const { getSupabaseAdmin } = await import('@/lib/supabase')
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          in: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
+    } as any)
+    process.env.OPENAI_API_KEY = 'sk-from-env'
+
+    const provider = await getTranscriptionProvider()
+    expect(provider?.name).toBe('openai')
+  })
+
+  it('returns null when no API keys are configured anywhere', async () => {
+    const { getSupabaseAdmin } = await import('@/lib/supabase')
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          in: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
+    } as any)
+
+    const provider = await getTranscriptionProvider()
+    expect(provider).toBeNull()
+  })
+})
+
+// ============================================================
+// transcribeAudio (public API)
+// ============================================================
+import { transcribeAudio } from './index'
+
+describe('transcribeAudio', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    delete process.env.OPENAI_API_KEY
+    delete process.env.GOOGLE_GENERATIVE_AI_API_KEY
+  })
+
+  it('returns null and warns when no provider is available', async () => {
+    const { getSupabaseAdmin } = await import('@/lib/supabase')
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          in: () => Promise.resolve({ data: [], error: null }),
+        }),
+      }),
+    } as any)
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await transcribeAudio(Buffer.from('audio'), 'audio/ogg')
+
+    expect(result).toBeNull()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('No transcription provider'))
+    warnSpy.mockRestore()
+  })
+
+  it('returns text and transcriptionResult on success via OpenAI provider', async () => {
+    const { getSupabaseAdmin } = await import('@/lib/supabase')
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          in: () =>
+            Promise.resolve({
+              data: [{ key: 'openai_api_key', value: 'sk-test' }],
+              error: null,
+            }),
+        }),
+      }),
+    } as any)
+
+    // Note: fetch is mocked globally (vi.stubGlobal) earlier in this file
+    const mockFetchForIndex = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ text: 'Quero marcar uma consulta' }),
+    })
+    vi.stubGlobal('fetch', mockFetchForIndex)
+
+    const result = await transcribeAudio(Buffer.from('audio-data'), 'audio/ogg')
+
+    expect(result).not.toBeNull()
+    expect(result!.text).toBe('Quero marcar uma consulta')
+    expect(result!.transcriptionResult?.provider).toBe('openai')
+  })
+})
