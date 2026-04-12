@@ -30,6 +30,8 @@ export class GeminiTranscriptionProvider implements TranscriptionProvider {
   ) {}
 
   async transcribe({ buffer, mimeType }: TranscriptionParams): Promise<TranscriptionResult> {
+    if (!this.apiKey) throw new Error('Chave Google não configurada. Acesse Configurações → IA.')
+
     const google = createGoogleGenerativeAI({ apiKey: this.apiKey })
     const model = google(this.modelId)
 

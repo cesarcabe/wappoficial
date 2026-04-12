@@ -107,7 +107,9 @@ describe('OpenAITranscriptionProvider', () => {
 // ============================================================
 import { GeminiTranscriptionProvider, DEFAULT_GEMINI_TRANSCRIPTION_MODEL } from './providers/gemini'
 
-// Mock the AI SDK to avoid real API calls in tests
+// NOTE: vi.mock is hoisted by Vitest to the top of the module — these mocks apply to the
+// entire file, not just the Gemini describe block. Safe here because the OpenAI provider
+// does not import 'ai' or '@ai-sdk/google'.
 vi.mock('ai', () => ({
   generateText: vi.fn(),
 }))
