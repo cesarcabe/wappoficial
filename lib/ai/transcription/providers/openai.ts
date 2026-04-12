@@ -49,9 +49,12 @@ export class OpenAITranscriptionProvider implements TranscriptionProvider {
       throw new Error(`[transcription:openai] HTTP ${response.status}: ${errorBody}`)
     }
 
-    const data = (await response.json()) as { text: string }
+    const data = (await response.json()) as { text?: string }
+    console.log(
+      `[transcription:openai] Transcribed ${(data.text ?? '').trim().length} chars, language: ${language}`
+    )
     return {
-      text: data.text.trim(),
+      text: (data.text ?? '').trim(),
       provider: this.name,
       model: OPENAI_WHISPER_MODEL,
       language,

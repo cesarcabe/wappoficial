@@ -54,6 +54,11 @@ describe('OpenAITranscriptionProvider', () => {
         }),
       })
     )
+    const [, callOptions] = mockFetch.mock.calls[0]
+    const body = callOptions.body as FormData
+    expect(body.get('model')).toBe(OPENAI_WHISPER_MODEL)
+    expect(body.get('language')).toBe('pt')
+    expect((body.get('file') as File).name).toBe('audio.ogg')
     expect(result.text).toBe('Olá, tudo bem?')
     expect(result.provider).toBe('openai')
     expect(result.model).toBe(OPENAI_WHISPER_MODEL)
