@@ -49,9 +49,6 @@ export async function transcribeAudio(
   const provider = await getTranscriptionProvider()
 
   if (!provider) {
-    console.warn(
-      '[transcription] No transcription provider available — configure openai_api_key or google_api_key in Settings'
-    )
     return null
   }
 
@@ -59,12 +56,18 @@ export async function transcribeAudio(
     `[transcription] Transcribing ${buffer.length} bytes (${mimeType}) with ${provider.name}...`
   )
 
-  const result = await provider.transcribe({ buffer, mimeType, language })
+  try {
+    const result = await provider.transcribe({ buffer, mimeType, language })
 
-  console.log(`[transcription] ✅ ${provider.name}: "${result.text.slice(0, 80)}..."`)
+    const preview = result.text.length > 80 ? `${result.text.slice(0, 80)}...` : result.text
+    console.log(`[transcription] ✅ ${provider.name}: "${preview}"`)
 
-  return {
-    text: result.text,
-    transcriptionResult: result,
+    return {
+      text: result.text,
+      transcriptionResult: result,
+    }
+  } catch (error) {
+    console.error(`[transcription] Provider ${provider.name} failed:`, error)
+    return null
   }
 }
