@@ -87,4 +87,15 @@ describe('downloadWhatsAppMedia', () => {
     expect(result.mimeType).toBe('audio/ogg')
     expect(Buffer.isBuffer(result.buffer)).toBe(true)
   })
+
+  it('throws when CDN download returns non-ok', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ url: 'https://cdn.example.com/audio.ogg', mime_type: 'audio/ogg', id: 'x' }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 403, statusText: 'Forbidden' })
+
+    await expect(downloadWhatsAppMedia('media-id', 'token')).rejects.toThrow('403')
+  })
 })
