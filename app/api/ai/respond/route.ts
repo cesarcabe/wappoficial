@@ -173,7 +173,12 @@ export async function POST(req: NextRequest) {
 
     console.log(`✅ [AI-RESPOND] AI result: success=${result.success}, latency=${result.latencyMs}ms`)
 
-    // 8. Trata erro da IA
+    // 8. Trata resultado da IA
+    if (result.flowSent) {
+      console.log(`✅ [AI-RESPOND] Booking flow sent — no text response needed`)
+      return NextResponse.json({ success: true, flowSent: true })
+    }
+
     if (!result.success || !result.response?.message) {
       console.log(`❌ [AI-RESPOND] AI failed: ${result.error}`)
 

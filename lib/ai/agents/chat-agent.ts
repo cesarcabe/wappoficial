@@ -127,6 +127,7 @@ export interface SupportAgentResult {
   error?: string
   latencyMs: number
   logId?: string
+  flowSent?: boolean // true quando o flow de agendamento foi enviado (sem resposta de texto adicional)
 }
 
 // =============================================================================
@@ -756,6 +757,22 @@ export async function processChatAgent(
       }
 
       retryCount++
+    }
+
+    // Flow de agendamento enviado — não envia mensagem de texto adicional
+    if (hasSentFlow) {
+      console.log(`[chat-agent] 📅 Flow sent — skipping text response`)
+      const logId = await persistAILog({
+        conversationId: conversation.id,
+        agentId: agent.id,
+        messageIds,
+        input: inputText,
+        output: null,
+        latencyMs: Date.now() - startTime,
+        error: null,
+        modelUsed: modelId,
+      })
+      return { success: true, flowSent: true, latencyMs: Date.now() - startTime, logId }
     }
 
     // Se ainda não respondeu após todos os retries, usa o texto como fallback
