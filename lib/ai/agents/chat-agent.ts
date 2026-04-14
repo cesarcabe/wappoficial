@@ -439,6 +439,7 @@ export async function processChatAgent(
 
     // Flags de estado
     let hasResponded = false
+    let hasSentFlow = false
     let shouldQuoteUserMessage = false // Setado pelo tool quoteMessage
 
     const respondTool = tool({
@@ -543,6 +544,7 @@ export async function processChatAgent(
 
             if (result.success) {
               console.log(`[chat-agent] 📅 Booking flow sent successfully: ${result.messageId}`)
+              hasSentFlow = true
               return {
                 sent: true,
                 message: 'Formulário de agendamento enviado com sucesso. O cliente verá os horários disponíveis.',
@@ -633,6 +635,10 @@ export async function processChatAgent(
         console.log(`[chat-agent] 🛑 Stopping: respond tool was called`)
         return true
       }
+      if (hasSentFlow) {
+        console.log(`[chat-agent] 🛑 Stopping: booking flow was sent`)
+        return true
+      }
       return false
     }
 
@@ -647,7 +653,7 @@ export async function processChatAgent(
     let retryCount = 0
     let lastLLMText = '' // Guarda texto que o LLM gerou sem chamar tool
 
-    while (!hasResponded && retryCount <= MAX_TOOL_RETRIES) {
+    while (!hasResponded && !hasSentFlow && retryCount <= MAX_TOOL_RETRIES) {
       // Timeout AbortController - previne que chamadas de IA fiquem penduradas
       const abortController = new AbortController()
       const timeoutId = setTimeout(() => {

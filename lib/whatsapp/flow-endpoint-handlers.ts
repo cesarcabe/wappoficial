@@ -612,8 +612,9 @@ async function createBookingEvent(params: {
   slotIso: string
   service: string
   customerName: string
-  customerPhone: string
+  customerPhone?: string
   notes?: string
+  instagram?: string
 }): Promise<{ eventId: string; eventLink?: string }> {
   const config = await getCalendarBookingConfig()
   const calendarConfig = await getCalendarConfig()
@@ -636,7 +637,8 @@ async function createBookingEvent(params: {
       summary: `${serviceName} - ${params.customerName}`,
       description: [
         `Cliente: ${params.customerName}`,
-        `Telefone: ${params.customerPhone}`,
+        params.customerPhone ? `Telefone: ${params.customerPhone}` : null,
+        params.instagram ? `Instagram: ${params.instagram}` : null,
         params.notes ? `Observações: ${params.notes}` : null,
         '',
         'Agendado via WhatsApp (SmartZap)',
@@ -839,10 +841,12 @@ async function handleDataExchange(
         const customerNameKey = runtime?.payloadKeyByField?.customer_name || 'customer_name'
         const customerPhoneKey = runtime?.payloadKeyByField?.customer_phone || 'customer_phone'
         const notesKey = runtime?.payloadKeyByField?.notes || 'notes'
+        const instagramKey = runtime?.payloadKeyByField?.instagram || 'instagram'
 
         const customerName = data[customerNameKey] as string
         const customerPhone = data[customerPhoneKey] as string
         const notes = data[notesKey] as string
+        const instagram = data[instagramKey] as string
         const selectedSlot = data[slotKey] as string
         const selectedService = data[serviceKey] as string
 
@@ -857,29 +861,31 @@ async function handleDataExchange(
           customerName: customerName.trim(),
           customerPhone: customerPhone || '',
           notes,
+          instagram: instagram || '',
         })
 
         // Formatar horario para exibicao
         const slotDate = new Date(selectedSlot)
         const config = await getCalendarBookingConfig()
         const formattedTime = formatInTimeZone(slotDate, config.timezone, 'HH:mm')
-        const dateKey = formatInTimeZone(slotDate, config.timezone, 'yyyy-MM-dd')
-        const formattedDate = formatDateLabel(dateKey, config.timezone)
+        const dateStr = formatInTimeZone(slotDate, config.timezone, 'yyyy-MM-dd')
+        const formattedDate = formatDateLabel(dateStr, config.timezone)
 
         const services = await getBookingServices(runtime?.fallbackServices)
         const serviceInfo = services.find((s) => s.id === selectedService)
         const serviceName = serviceInfo?.title || selectedService
 
         // Finalizar flow com confirmacao
-        return createCloseResponse({
+        return createSuccessResponse('SUCCESS', {
           success: true,
           event_id: result.eventId,
           [serviceKey]: selectedService,
-          [dateKey]: formatInTimeZone(slotDate, config.timezone, 'yyyy-MM-dd'),
+          [dateKey]: dateStr,
           [slotKey]: selectedSlot,
           [customerNameKey]: customerName.trim(),
           [customerPhoneKey]: customerPhone || '',
           [notesKey]: notes || '',
+          [instagramKey]: instagram || '',
           message: `Agendamento confirmado!\n\n${serviceName}\n${formattedDate} as ${formattedTime}\n\nVoce recebera um lembrete.`,
         })
       }
