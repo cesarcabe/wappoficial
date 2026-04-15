@@ -9,7 +9,6 @@
 import { settingsDb } from '@/lib/supabase-db'
 import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 import { sendFlowMessage } from '@/lib/whatsapp-send'
-import { redis } from '@/lib/redis'
 
 // =============================================================================
 // TYPES
@@ -174,8 +173,6 @@ export async function getBookingConfig(): Promise<BookingConfig | null> {
 // SEND BOOKING FLOW
 // =============================================================================
 
-// Chave Redis para notas BANT associadas a um flow_token
-export const BANT_NOTES_KEY = (flowToken: string) => `bant_notes:${flowToken}`
 // TTL de 24h — tempo suficiente para o usuário preencher o form
 const BANT_NOTES_TTL_SECONDS = 60 * 60 * 24
 
@@ -200,11 +197,14 @@ export async function sendBookingFlow(phoneNumber: string, bantNotes?: string): 
   // Gera token com telefone embutido para recuperar BANT no handler do flow
   const flowToken = `smartzap:${config.metaFlowId}:${phoneNumber}:${Date.now()}`
 
-  // Persiste BANT no Redis associado ao token (best-effort)
-  if (bantNotes?.trim() && redis) {
+  // Persiste BANT no Redis associado ao token (best-effort, import lazy)
+  if (bantNotes?.trim()) {
     try {
-      await redis.set(BANT_NOTES_KEY(flowToken), bantNotes.trim(), { ex: BANT_NOTES_TTL_SECONDS })
-      console.log(`[booking-tool] 📝 BANT notes saved for token ${flowToken}`)
+      const { redis } = await import('@/lib/redis')
+      if (redis) {
+        await redis.set(`bant_notes:${flowToken}`, bantNotes.trim(), { ex: BANT_NOTES_TTL_SECONDS })
+        console.log(`[booking-tool] 📝 BANT notes saved for token ${flowToken}`)
+      }
     } catch (e) {
       console.warn('[booking-tool] Failed to save BANT notes to Redis:', e)
     }

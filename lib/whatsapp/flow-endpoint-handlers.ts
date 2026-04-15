@@ -16,7 +16,6 @@ import { settingsDb } from '@/lib/supabase-db'
 import { supabase } from '@/lib/supabase'
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { redis } from '@/lib/redis'
-import { BANT_NOTES_KEY } from '@/lib/ai/tools/booking-tool'
 import {
   createSuccessResponse,
   createCloseResponse,
@@ -862,10 +861,11 @@ async function handleDataExchange(
         let bantNotes: string | null = null
         if (flowToken && redis) {
           try {
-            bantNotes = await redis.get<string>(BANT_NOTES_KEY(flowToken))
+            const bantKey = `bant_notes:${flowToken}`
+            bantNotes = await redis.get<string>(bantKey)
             if (bantNotes) {
               console.log(`[flow-handler] 📝 BANT notes retrieved for token ${flowToken}`)
-              await redis.del(BANT_NOTES_KEY(flowToken))
+              await redis.del(bantKey)
             }
           } catch (e) {
             console.warn('[flow-handler] Failed to retrieve BANT notes from Redis:', e)
