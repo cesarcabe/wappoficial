@@ -1069,6 +1069,14 @@ export async function POST(request: NextRequest) {
           try {
             const interactiveType = message?.interactive?.type
             const nfm = message?.interactive?.nfm_reply
+            if (messageType === 'interactive') {
+              console.log('[Webhook] Interactive inbound detected', {
+                interactiveType: interactiveType || 'unknown',
+                hasNfmReply: !!nfm,
+                hasResponseJson: !!nfm?.response_json,
+                messageId: message?.id || null,
+              })
+            }
 
             if (messageType === 'interactive' && interactiveType === 'nfm_reply' && nfm?.response_json) {
               const messageId = (message?.id || '') as string
@@ -1094,6 +1102,16 @@ export async function POST(request: NextRequest) {
               const responseRaw = typeof nfm.response_json === 'string' ? nfm.response_json : JSON.stringify(nfm.response_json)
               const responseJson = safeParseJson(nfm.response_json)
               const messageTimestamp = tryParseWebhookTimestampSeconds(message?.timestamp).iso
+              console.log('[Webhook] nfm_reply payload received', {
+                messageId,
+                flowIdRaw: nfm?.flow_id || nfm?.flowId || null,
+                flowNameRaw: nfm?.name || null,
+                responseJsonType: typeof responseJson,
+                responseJsonKeys:
+                  responseJson && typeof responseJson === 'object'
+                    ? Object.keys(responseJson as Record<string, unknown>)
+                    : [],
+              })
 
               // IMPORTANTE: Meta WhatsApp retorna flow_token DENTRO do response_json, não no nfm diretamente
               let flowId = (nfm?.flow_id || nfm?.flowId || (responseJson as any)?.flow_id || null) as string | null
@@ -1566,11 +1584,15 @@ export async function POST(request: NextRequest) {
                       ]
                       parts = rawParts.filter((value) => value !== null && value !== undefined) as string[]
                     }
+                    const confirmationText = parts.join('\n')
+                    console.log('[Webhook] Sending confirmation message', {
+                      messageId,
+                      to: maskPhone(normalizedFrom),
+                      partsCount: parts.length,
+                      textPreview: confirmationText.substring(0, 180),
+                    })
 
-                    try {
-                    } catch {}
-
-                    await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+                    const graphResponse = await fetch(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
                       method: 'POST',
                       headers: {
                         Authorization: `Bearer ${token}`,
@@ -1580,13 +1602,41 @@ export async function POST(request: NextRequest) {
                         messaging_product: 'whatsapp',
                         to: normalizedFrom,
                         type: 'text',
-                        text: { body: parts.join('\n') },
+                        text: { body: confirmationText },
                       }),
                     })
+                    if (!graphResponse.ok) {
+                      const errorBody = await graphResponse.text().catch(() => '')
+                      console.warn('[Webhook] Confirmation message send failed', {
+                        messageId,
+                        status: graphResponse.status,
+                        statusText: graphResponse.statusText,
+                        bodyPreview: errorBody.substring(0, 400),
+                      })
+                    } else {
+                      const successBody = await graphResponse.text().catch(() => '')
+                      console.log('[Webhook] Confirmation message sent', {
+                        messageId,
+                        status: graphResponse.status,
+                        bodyPreview: successBody.substring(0, 220),
+                      })
+                    }
+                  } else {
+                    console.log('[Webhook] Confirmation skipped by flag', {
+                      messageId,
+                      sendConfirmationFlag,
+                    })
                   }
-
+                } else {
+                  console.warn('[Webhook] Missing WhatsApp credentials for confirmation', {
+                    messageId,
+                    hasToken: !!token,
+                    hasPhoneNumberId: !!phoneNumberId,
+                    hasRecipient: !!normalizedFrom,
+                  })
                 }
               } catch (e) {
+                console.warn('[Webhook] Confirmation message block failed', e)
               }
             }
           } catch (e) {
