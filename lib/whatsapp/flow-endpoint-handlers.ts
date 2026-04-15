@@ -22,6 +22,7 @@ import {
   createErrorResponse,
   type FlowDataExchangeRequest,
 } from './flow-endpoint-crypto'
+import { sendWhatsAppMessage } from '@/lib/whatsapp-send'
 
 // --- Tipos ---
 
@@ -424,6 +425,32 @@ function formatDateChip(dateStr: string, timeZone: string): string {
   const date = fromZonedTime(`${dateStr}T00:00:00`, timeZone)
   const dayLabel = getWeekdayLabel(date, timeZone)
   return `${dayLabel} - ${formatInTimeZone(date, timeZone, 'dd/MM')}`
+}
+
+function extractPhoneFromFlowToken(flowToken?: string | null): string | null {
+  const raw = String(flowToken || '').trim()
+  if (!raw) return null
+  const parts = raw.split(':')
+  // Expected format from booking-tool:
+  // smartzap:<metaFlowId>:<phone>:<timestamp>
+  if (parts.length < 4 || parts[0] !== 'smartzap') return null
+  const phone = parts[2] || ''
+  return /^\+?\d{8,15}$/.test(phone) ? phone : null
+}
+
+function buildConfirmationDedupeKey(params: {
+  flowToken?: string | null
+  selectedSlot: string
+  selectedService: string
+  customerName: string
+}): string {
+  if (params.flowToken) {
+    return `booking_confirmation_sent:${params.flowToken}:${params.selectedSlot}`
+  }
+  const normalizedName = params.customerName.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+  const normalizedService = params.selectedService.trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+  const normalizedSlot = params.selectedSlot.trim().replace(/[^0-9a-z]/gi, '')
+  return `booking_confirmation_sent:fallback:${normalizedService}:${normalizedSlot}:${normalizedName}`
 }
 
 type CalendarPickerData = {
@@ -894,6 +921,63 @@ async function handleDataExchange(
         const services = await getBookingServices(runtime?.fallbackServices)
         const serviceInfo = services.find((s) => s.id === selectedService)
         const serviceName = serviceInfo?.title || selectedService
+
+        // Fallback de confirmação: envia texto direto após sucesso no booking
+        // para cobrir cenários em que o cliente não emite nfm_reply.
+        const recipientPhone = extractPhoneFromFlowToken(flowToken)
+        if (recipientPhone) {
+          const confirmationText = [
+            'Agendamento confirmado ✅',
+            `Serviço: ${serviceName}`,
+            `Data: ${formattedDate}`,
+            `Horário: ${formattedTime}`,
+            `Nome: ${customerName.trim()}`,
+            'Qualquer ajuste, responda esta mensagem.',
+          ].join('\n')
+          const dedupeKey = buildConfirmationDedupeKey({
+            flowToken,
+            selectedSlot,
+            selectedService,
+            customerName,
+          })
+          try {
+            const alreadySent = redis ? await redis.get<string>(dedupeKey) : null
+            if (!alreadySent) {
+              const sendResult = await sendWhatsAppMessage({
+                to: recipientPhone,
+                type: 'text',
+                text: confirmationText,
+              })
+              if (sendResult.success) {
+                if (redis) {
+                  await redis.set(dedupeKey, '1', { ex: 60 * 60 * 24 })
+                }
+                console.log('[flow-handler] ✅ Direct booking confirmation sent', {
+                  to: recipientPhone,
+                  dedupeKey,
+                  messageId: sendResult.messageId || null,
+                })
+              } else {
+                console.warn('[flow-handler] Failed to send direct booking confirmation', {
+                  to: recipientPhone,
+                  dedupeKey,
+                  error: sendResult.error || 'unknown',
+                })
+              }
+            } else {
+              console.log('[flow-handler] Direct booking confirmation skipped (dedupe)', {
+                to: recipientPhone,
+                dedupeKey,
+              })
+            }
+          } catch (sendErr) {
+            console.warn('[flow-handler] Direct booking confirmation error:', sendErr)
+          }
+        } else {
+          console.warn('[flow-handler] Direct booking confirmation skipped (no phone in flow_token)', {
+            flowTokenPresent: !!flowToken,
+          })
+        }
 
         // Finalizar flow — SUCCESS tem data: {} estático, não aceita campos dinâmicos
         return createSuccessResponse('SUCCESS', {})
