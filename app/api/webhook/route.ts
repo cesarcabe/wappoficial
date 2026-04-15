@@ -43,6 +43,7 @@ import {
 } from '@/lib/inbox/inbox-webhook'
 import { downloadWhatsAppMedia } from '@/lib/whatsapp/media-download'
 import { transcribeAudio } from '@/lib/ai/transcription'
+import { extractBookingConfirmationFields } from '@/lib/whatsapp/booking-confirmation'
 
 // Get WhatsApp Access Token from centralized helper
 async function getWhatsAppAccessToken(): Promise<string | null> {
@@ -1402,16 +1403,17 @@ export async function POST(request: NextRequest) {
                       confirmationConfig?.labels && typeof confirmationConfig.labels === 'object'
                         ? confirmationConfig.labels
                         : null
-                    let selectedDate = typeof responseObj.selected_date === 'string' ? responseObj.selected_date : null
-                    const selectedSlot = typeof responseObj.selected_slot === 'string' ? responseObj.selected_slot : null
-                    const service = typeof responseObj.selected_service === 'string' ? responseObj.selected_service : null
-                    const customerName = typeof responseObj.customer_name === 'string' ? responseObj.customer_name : null
-                    const customerPhone = typeof responseObj.customer_phone === 'string' ? responseObj.customer_phone : null
-                    const notes = typeof responseObj.notes === 'string' ? responseObj.notes : null
-                    if (!selectedDate && responseObj && typeof responseObj === 'object') {
-                      const dateKey = Object.keys(responseObj as any).find((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
-                      if (dateKey) selectedDate = dateKey
-                    }
+                    const bookingFields = extractBookingConfirmationFields({
+                      responseObj,
+                      fieldLabelMap,
+                      labelsFromConfig,
+                    })
+                    const selectedDate = bookingFields.selectedDate
+                    const selectedSlot = bookingFields.selectedSlot
+                    const service = bookingFields.service
+                    const customerName = bookingFields.customerName
+                    const customerPhone = bookingFields.customerPhone
+                    const notes = bookingFields.notes
                     const hasBookingFields = Boolean(selectedDate || selectedSlot || service)
                     const rawMessage = typeof responseObj.message === 'string' ? responseObj.message : ''
                     const hasStructuredMessage =
