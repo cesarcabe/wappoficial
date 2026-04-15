@@ -880,6 +880,8 @@ async function handleDataExchange(
         const instagram = data[instagramKey] as string
         const selectedSlot = data[slotKey] as string
         const selectedService = data[serviceKey] as string
+        const recipientPhone = extractPhoneFromFlowToken(flowToken)
+        const resolvedCustomerPhone = (customerPhone || recipientPhone || '').trim()
 
         if (!customerName?.trim()) {
           return createErrorResponse('Informe seu nome')
@@ -907,7 +909,7 @@ async function handleDataExchange(
           slotIso: selectedSlot,
           service: selectedService,
           customerName: customerName.trim(),
-          customerPhone: customerPhone || '',
+          customerPhone: resolvedCustomerPhone,
           notes: combinedNotes,
           instagram: instagram || '',
         })
@@ -925,7 +927,6 @@ async function handleDataExchange(
 
         // Fallback de confirmação: envia texto direto após sucesso no booking
         // para cobrir cenários em que o cliente não emite nfm_reply.
-        const recipientPhone = extractPhoneFromFlowToken(flowToken)
         if (recipientPhone) {
           const confirmationText = [
             'Agendamento confirmado ✅',
