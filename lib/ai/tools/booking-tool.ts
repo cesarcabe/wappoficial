@@ -9,6 +9,7 @@
 import { settingsDb } from '@/lib/supabase-db'
 import { isSupabaseConfigured, supabase } from '@/lib/supabase'
 import { sendFlowMessage } from '@/lib/whatsapp-send'
+import { redis } from '@/lib/redis'
 
 // =============================================================================
 // TYPES
@@ -173,13 +174,19 @@ export async function getBookingConfig(): Promise<BookingConfig | null> {
 // SEND BOOKING FLOW
 // =============================================================================
 
+// Chave Redis para notas BANT associadas a um flow_token
+export const BANT_NOTES_KEY = (flowToken: string) => `bant_notes:${flowToken}`
+// TTL de 24h — tempo suficiente para o usuário preencher o form
+const BANT_NOTES_TTL_SECONDS = 60 * 60 * 24
+
 /**
  * Send a booking flow message to a phone number.
  *
  * @param phoneNumber - Recipient phone number
+ * @param bantNotes - Optional BANT qualification notes to include in the calendar event description
  * @returns Result with success status and message ID
  */
-export async function sendBookingFlow(phoneNumber: string): Promise<SendBookingFlowResult> {
+export async function sendBookingFlow(phoneNumber: string, bantNotes?: string): Promise<SendBookingFlowResult> {
   const config = await getBookingConfig()
 
   if (!config) {
@@ -190,6 +197,19 @@ export async function sendBookingFlow(phoneNumber: string): Promise<SendBookingF
     }
   }
 
+  // Gera token com telefone embutido para recuperar BANT no handler do flow
+  const flowToken = `smartzap:${config.metaFlowId}:${phoneNumber}:${Date.now()}`
+
+  // Persiste BANT no Redis associado ao token (best-effort)
+  if (bantNotes?.trim() && redis) {
+    try {
+      await redis.set(BANT_NOTES_KEY(flowToken), bantNotes.trim(), { ex: BANT_NOTES_TTL_SECONDS })
+      console.log(`[booking-tool] 📝 BANT notes saved for token ${flowToken}`)
+    } catch (e) {
+      console.warn('[booking-tool] Failed to save BANT notes to Redis:', e)
+    }
+  }
+
   const result = await sendFlowMessage({
     to: phoneNumber,
     flowId: config.metaFlowId,
@@ -197,6 +217,7 @@ export async function sendBookingFlow(phoneNumber: string): Promise<SendBookingF
     ctaText: config.ctaText,
     headerText: config.headerText,
     flowAction: 'navigate',
+    flowToken,
   })
 
   return {

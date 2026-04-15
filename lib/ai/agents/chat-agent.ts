@@ -535,13 +535,16 @@ export async function processChatAgent(
       if (prereqs.ready) {
         const sendBookingFlowTool = tool({
           description: BOOKING_TOOL_DESCRIPTION,
-          // Schema com campo opcional - alguns providers não lidam bem com schemas vazios
           inputSchema: z.object({
-            confirm: z.boolean().optional().describe('Confirmação para enviar o formulário de agendamento (sempre true)')
+            confirm: z.boolean().optional().describe('Confirmação para enviar o formulário de agendamento (sempre true)'),
+            bant_notes: z.string().optional().describe('Resumo das informações BANT coletadas na conversa (Budget, Authority, Need, Timeline). Será incluído na descrição do evento no Google Calendar.'),
           }),
-          execute: async () => {
+          execute: async ({ bant_notes }) => {
             console.log(`[chat-agent] 📅 LLM requested booking flow for: ${conversation.phone}`)
-            const result = await sendBookingFlow(conversation.phone)
+            if (bant_notes) {
+              console.log(`[chat-agent] 📝 BANT notes: ${bant_notes.slice(0, 100)}`)
+            }
+            const result = await sendBookingFlow(conversation.phone, bant_notes)
 
             if (result.success) {
               console.log(`[chat-agent] 📅 Booking flow sent successfully: ${result.messageId}`)

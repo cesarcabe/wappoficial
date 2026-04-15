@@ -15,6 +15,8 @@ import {
 import { settingsDb } from '@/lib/supabase-db'
 import { supabase } from '@/lib/supabase'
 import { isSupabaseConfigured } from '@/lib/supabase'
+import { redis } from '@/lib/redis'
+import { BANT_NOTES_KEY } from '@/lib/ai/tools/booking-tool'
 import {
   createSuccessResponse,
   createCloseResponse,
@@ -695,7 +697,7 @@ export async function handleFlowAction(
       break
 
     case 'data_exchange':
-      result = await handleDataExchange(screen || '', data || {}, runtime)
+      result = await handleDataExchange(screen || '', data || {}, runtime, flowToken || null)
       break
 
     case 'BACK':
@@ -759,7 +761,8 @@ async function handleInit(runtime?: BookingRuntimeKeys | null): Promise<Record<s
 async function handleDataExchange(
   screen: string,
   data: Record<string, unknown>,
-  runtime?: BookingRuntimeKeys | null
+  runtime?: BookingRuntimeKeys | null,
+  flowToken?: string | null
 ): Promise<Record<string, unknown>> {
   try {
     const startScreenId = runtime?.startScreenId || 'BOOKING_START'
@@ -854,13 +857,29 @@ async function handleDataExchange(
           return createErrorResponse('Informe seu nome')
         }
 
+        // Recupera notas BANT salvas antes do envio do flow (best-effort)
+        let bantNotes: string | null = null
+        if (flowToken && redis) {
+          try {
+            bantNotes = await redis.get<string>(BANT_NOTES_KEY(flowToken))
+            if (bantNotes) {
+              console.log(`[flow-handler] 📝 BANT notes retrieved for token ${flowToken}`)
+              await redis.del(BANT_NOTES_KEY(flowToken))
+            }
+          } catch (e) {
+            console.warn('[flow-handler] Failed to retrieve BANT notes from Redis:', e)
+          }
+        }
+
+        const combinedNotes = [bantNotes, notes].filter(Boolean).join('\n') || undefined
+
         // Criar evento no calendario
         const result = await createBookingEvent({
           slotIso: selectedSlot,
           service: selectedService,
           customerName: customerName.trim(),
           customerPhone: customerPhone || '',
-          notes,
+          notes: combinedNotes,
           instagram: instagram || '',
         })
 
