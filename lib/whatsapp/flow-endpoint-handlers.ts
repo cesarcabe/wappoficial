@@ -23,6 +23,7 @@ import {
   type FlowDataExchangeRequest,
 } from './flow-endpoint-crypto'
 import { sendWhatsAppMessage } from '@/lib/whatsapp-send'
+import { syncOutboundTextToInbox } from '@/lib/inbox/inbox-service'
 
 // --- Tipos ---
 
@@ -949,6 +950,20 @@ async function handleDataExchange(
                 text: confirmationText,
               })
               if (sendResult.success) {
+                await syncOutboundTextToInbox({
+                  phone: recipientPhone,
+                  content: confirmationText,
+                  whatsappMessageId: sendResult.messageId,
+                  payload: {
+                    type: 'booking_confirmation_fallback',
+                    dedupe_key: dedupeKey,
+                    selected_service: selectedService,
+                    selected_slot: selectedSlot,
+                    selected_date: dateStr,
+                    customer_name: customerName.trim(),
+                    sent_at: new Date().toISOString(),
+                  },
+                })
                 if (redis) {
                   await redis.set(dedupeKey, '1', { ex: 60 * 60 * 24 })
                 }

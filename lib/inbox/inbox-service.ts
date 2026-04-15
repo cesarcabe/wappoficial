@@ -368,6 +368,14 @@ export interface SyncCampaignTemplateParams {
   template: Template
 }
 
+export interface SyncOutboundTextToInboxParams {
+  phone: string
+  content: string
+  whatsappMessageId?: string
+  contactId?: string | null
+  payload?: Record<string, unknown>
+}
+
 /**
  * Sincroniza template enviado por campanha com o inbox.
  *
@@ -436,6 +444,61 @@ export async function syncCampaignTemplateToInbox(
     // Best-effort: log e retorna null, não propaga erro
     console.warn(
       `[inbox-sync] Failed to sync template to inbox for ${phone}:`,
+      error instanceof Error ? error.message : error
+    )
+    return null
+  }
+}
+
+/**
+ * Sincroniza mensagem outbound de texto no inbox.
+ *
+ * Use quando a mensagem foi enviada por um fluxo paralelo (fora de sendMessage)
+ * e precisa aparecer na UI do Inbox.
+ *
+ * Características:
+ * - Idempotente por whatsapp_message_id (quando disponível)
+ * - Best-effort: loga e retorna null em erro
+ */
+export async function syncOutboundTextToInbox(
+  params: SyncOutboundTextToInboxParams
+): Promise<string | null> {
+  const {
+    phone,
+    content,
+    whatsappMessageId,
+    contactId,
+    payload,
+  } = params
+
+  try {
+    if (whatsappMessageId) {
+      const existing = await findMessageByWhatsAppId(whatsappMessageId)
+      if (existing) {
+        return existing.id
+      }
+    }
+
+    const conversation = await getOrCreateConversation(
+      phone,
+      contactId || undefined,
+      undefined
+    )
+
+    const message = await createMessage({
+      conversation_id: conversation.id,
+      direction: 'outbound',
+      content,
+      message_type: 'text',
+      whatsapp_message_id: whatsappMessageId,
+      delivery_status: 'sent',
+      payload: payload || undefined,
+    })
+
+    return message.id
+  } catch (error) {
+    console.warn(
+      `[inbox-sync] Failed to sync outbound text for ${phone}:`,
       error instanceof Error ? error.message : error
     )
     return null
