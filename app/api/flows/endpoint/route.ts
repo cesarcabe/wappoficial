@@ -125,6 +125,24 @@ export async function POST(request: NextRequest) {
     try {
       response = await handleFlowAction(flowRequest)
       console.log('[flow-endpoint] ✅ Handler response:', JSON.stringify(response).substring(0, 500))
+      const responseObj = response as Record<string, unknown> | null
+      const responseScreen = responseObj && typeof responseObj === 'object'
+        ? (typeof responseObj.screen === 'string' ? responseObj.screen : null)
+        : null
+      const responseDataKeys =
+        responseObj &&
+        typeof responseObj === 'object' &&
+        responseObj.data &&
+        typeof responseObj.data === 'object' &&
+        !Array.isArray(responseObj.data)
+          ? Object.keys(responseObj.data as Record<string, unknown>)
+          : []
+      console.log('[flow-endpoint][RESULT_META]', {
+        action: flowRequest.action,
+        requestScreen: flowRequest.screen || null,
+        responseScreen,
+        responseDataKeys,
+      })
     } catch (error) {
       console.error('[flow-endpoint] ❌ Erro no handler:', error)
       response = createErrorResponse(

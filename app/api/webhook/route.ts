@@ -946,9 +946,19 @@ export async function POST(request: NextRequest) {
         for (const message of messages) {
           const from = message.from
           const messageType = message.type
+          const interactiveType = message?.interactive?.type || null
+          const hasNfmReplyPayload = !!message?.interactive?.nfm_reply?.response_json
           let text = extractInboundText(message)
           const phoneNumberId = change?.value?.metadata?.phone_number_id || null
           console.log(`📩 Incoming message from ${from}: ${messageType}${text ? ` | text="${text}"` : ''}`)
+          console.log('[Webhook][MESSAGE_META]', {
+            messageId: message?.id || null,
+            messageType: messageType || null,
+            interactiveType,
+            hasNfmReplyPayload,
+            hasInteractive: !!message?.interactive,
+            from: from ? maskPhone(normalizePhoneNumber(from)) : null,
+          })
 
           // =================================================================
           // Audio Transcription (best-effort)
