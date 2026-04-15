@@ -111,7 +111,8 @@ async function getBookingServices(fallback?: ServiceType[]): Promise<ServiceType
     console.log('[getBookingServices] Supabase not configured, using defaults')
     return DEFAULT_SERVICES
   }
-  const raw = await settingsDb.get('booking_services')
+  const rawValue = await settingsDb.get('booking_services')
+  const raw = typeof rawValue === 'string' ? rawValue : (rawValue ? JSON.stringify(rawValue) : null)
   // #region agent log
   console.log('[getBookingServices] from DB:', { hasRaw: !!raw, rawLength: raw?.length, rawPreview: raw?.substring(0, 100) })
   // #endregion
