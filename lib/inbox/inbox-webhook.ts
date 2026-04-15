@@ -67,6 +67,8 @@ export interface InboundMessagePayload {
   mediaUrl?: string | null
   /** Phone number ID that received the message */
   phoneNumberId?: string
+  /** Se true, persiste a mensagem mas não dispara processamento de IA */
+  skipAI?: boolean
 }
 
 export interface StatusUpdatePayload {
@@ -138,7 +140,9 @@ export async function handleInboundMessage(
         }
 
         if (currentMode === 'bot') {
-          if (isAutomationPaused(result.automation_paused_until)) {
+          if (payload.skipAI) {
+            console.log(`[Inbox] skipAI=true — persisted message but skipped AI trigger`)
+          } else if (isAutomationPaused(result.automation_paused_until)) {
             console.log(`[Inbox] Automation paused until ${result.automation_paused_until}, skipping AI`)
           } else {
             // Cria objeto lightweight para triggerAIProcessing
@@ -247,8 +251,10 @@ async function handleInboundMessageLegacy(
     currentMode = 'bot'
   }
 
-  if (currentMode === 'bot' && !isAutomationPaused(conversation.automation_paused_until)) {
+  if (currentMode === 'bot' && !payload.skipAI && !isAutomationPaused(conversation.automation_paused_until)) {
     triggeredAI = await triggerAIProcessing(conversation as InboxConversation, message)
+  } else if (payload.skipAI) {
+    console.log(`[Inbox] skipAI=true — persisted message but skipped AI trigger`)
   }
 
   return {

@@ -6,7 +6,7 @@ import { useTemplatesController } from '@/hooks/useTemplates';
 import { useLeadFormsController } from '@/hooks/useLeadForms'
 import { TemplateListView } from '@/components/features/templates/TemplateListView';
 import { useTemplateProjectsQuery, useTemplateProjectMutations } from '@/hooks/useTemplateProjects';
-import { Loader2, Plus, Folder, Search, RefreshCw, CheckCircle, AlertTriangle, Trash2, Pencil, LayoutGrid, Workflow, FileText, ClipboardList, Check, X } from 'lucide-react';
+import { Loader2, Plus, Folder, Search, RefreshCw, CheckCircle, AlertTriangle, Trash2, Pencil, LayoutGrid, Workflow, FileText, ClipboardList, Check, X, CloudDownload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Page, PageActions, PageDescription, PageHeader, PageTitle } from '@/components/ui/page';
 import { Button } from '@/components/ui/button';
@@ -112,7 +112,8 @@ export default function TemplatesPage() {
   // Estado de edição inline do nome
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
   const [editingTitle, setEditingTitle] = React.useState('');
-  const [isSyncingProjects, setIsSyncingProjects] = React.useState(false);
+  const [isSyncingProjects, setIsSyncingProjects] = React.useState(false)
+  const [isSyncingFlows, setIsSyncingFlows] = React.useState(false);
   const leadFormsController = useLeadFormsController()
 
   // Sincroniza todos os projetos com a Meta
@@ -138,6 +139,19 @@ export default function TemplatesPage() {
       setIsSyncingProjects(false);
     }
   };
+
+  const handleSyncFlows = async () => {
+    setIsSyncingFlows(true)
+    try {
+      const result = await flowsService.syncFromMeta()
+      flowsQuery.refetch()
+      toast.success(`${result.imported} flow(s) importado(s) da Meta`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao sincronizar flows')
+    } finally {
+      setIsSyncingFlows(false)
+    }
+  }
 
   const handleCreateManualTemplate = () => {
     // Navega para a página de criação sem criar rascunho no banco.
@@ -289,6 +303,10 @@ export default function TemplatesPage() {
               <Button variant="brand" onClick={handleQuickCreateFlow} disabled={isCreatingFlow}>
                 <Plus className="w-4 h-4" />
                 {isCreatingFlow ? 'Criando...' : 'Criar MiniApp'}
+              </Button>
+              <Button variant="outline" onClick={handleSyncFlows} disabled={isSyncingFlows || flowsQuery.isLoading}>
+                <CloudDownload className={cn('w-4 h-4', isSyncingFlows && 'animate-pulse')} />
+                {isSyncingFlows ? 'Sincronizando...' : 'Sincronizar Meta'}
               </Button>
               <Button variant="outline" onClick={() => router.push('/submissions')}>
                 <ClipboardList className="w-4 h-4" />

@@ -982,6 +982,8 @@ export async function POST(request: NextRequest) {
               timestamp: message.timestamp,
               mediaUrl: message.image?.url || message.video?.url || message.audio?.url || message.document?.url || null,
               phoneNumberId: phoneNumberId || undefined,
+              // nfm_reply = conclusão de flow: persiste no inbox mas não dispara IA
+              skipAI: messageType === 'interactive' && message?.interactive?.type === 'nfm_reply',
             })
             console.log(`📥 Inbox: conversation=${inboxResult.conversationId}, message=${inboxResult.messageId}, ai=${inboxResult.triggeredAI}`)
           } catch (inboxError) {

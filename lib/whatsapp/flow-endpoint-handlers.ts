@@ -875,19 +875,8 @@ async function handleDataExchange(
         const serviceInfo = services.find((s) => s.id === selectedService)
         const serviceName = serviceInfo?.title || selectedService
 
-        // Finalizar flow com confirmacao
-        return createSuccessResponse('SUCCESS', {
-          success: true,
-          event_id: result.eventId,
-          [serviceKey]: selectedService,
-          [dateKey]: dateStr,
-          [slotKey]: selectedSlot,
-          [customerNameKey]: customerName.trim(),
-          [customerPhoneKey]: customerPhone || '',
-          [notesKey]: notes || '',
-          [instagramKey]: instagram || '',
-          message: `Agendamento confirmado!\n\n${serviceName}\n${formattedDate} as ${formattedTime}\n\nVoce recebera um lembrete.`,
-        })
+        // Finalizar flow — SUCCESS tem data: {} estático, não aceita campos dinâmicos
+        return createSuccessResponse('SUCCESS', {})
       }
 
       default:
