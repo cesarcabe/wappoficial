@@ -7,8 +7,11 @@
  */
 
 import { useState, useEffect, Suspense } from 'react'
+import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Lock, Eye, EyeOff, LogIn } from 'lucide-react'
+import agileadsLogo from '@/idv-agileads/logo.png'
+
 
 function LoginForm() {
   const router = useRouter()
@@ -100,11 +103,14 @@ function LoginForm() {
     <div className="w-full max-w-md">
       {/* Logo */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-linear-to-br from-emerald-500 to-emerald-600 mb-4">
-          <span className="text-3xl font-bold text-white">S</span>
-        </div>
+        <Image
+          src={agileadsLogo}
+          alt="Agileads"
+          className="mx-auto mb-4 h-auto w-[260px] md:w-[340px]"
+          priority
+        />
         <h1 className="text-2xl font-bold text-[var(--ds-text-primary)]">
-          {companyName || 'SmartZap'}
+          {companyName || 'Agileads'}
         </h1>
         <p className="text-[var(--ds-text-secondary)] mt-1">Entre para continuar</p>
       </div>
@@ -165,23 +171,23 @@ function LoginForm() {
 
       {/* Footer */}
       <p className="text-center text-[var(--ds-text-muted)] text-sm mt-6">
-        SmartZap © {new Date().getFullYear()} |{' '}
+        AgiLeads © {new Date().getFullYear()} |{' '}
         <a
-          href="https://www.escoladeautomacao.com.br/"
+          href="https://www.agileads.com.br/"
           target="_blank"
           rel="noopener noreferrer"
           className="hover:text-emerald-500 transition-colors"
         >
-          Escola de Automação
+          Agileads
         </a>
         {' '}| by{' '}
         <a
-          href="https://instagram.com/thaleslaray"
           target="_blank"
+          href="https://instagram.com/agi.leads"
           rel="noopener noreferrer"
           className="hover:text-emerald-500 transition-colors"
         >
-          @thaleslaray
+          @agi.leads
         </a>
       </p>
     </div>
