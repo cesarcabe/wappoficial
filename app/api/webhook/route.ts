@@ -559,15 +559,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: 'ignored' })
   }
 
-  // Payload completo no Vercel Logs (filtro: [Webhook][META_RAW_BODY]). Desligue com WEBHOOK_LOG_FULL_PAYLOAD=0.
-  if (process.env.WEBHOOK_LOG_FULL_PAYLOAD !== '0') {
-    console.log('[Webhook][META_RAW_BODY]', rawBody)
-  } else {
-    console.log('📨 Webhook received:', JSON.stringify({
-      object: body?.object,
-      entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
-    }))
-  }
+  // Evita logs gigantes: guardamos payload estruturado em DB (whatsapp_status_events)
+  // e fazemos logs de alto nível aqui.
+  console.log('📨 Webhook received:', JSON.stringify({
+    object: body?.object,
+    entryCount: Array.isArray(body?.entry) ? body.entry.length : 0,
+  }))
 
   // OTIMIZAÇÃO V2: Paraleliza busca de defaultWorkflowId + keywordWorkflows
   // Antes: 2 queries sequenciais (~200ms cada)
